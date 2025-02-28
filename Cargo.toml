@@ -1,0 +1,32 @@
+[package]
+name = "testflow"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+thiserror = "2.0.11"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = "0.3"
+rand = "0.9.0"
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+libp2p = { package = "libp2p", version = "0.54", default-features = false, features = [
+    "macros",
+    "autonat",
+    "cbor",
+    "dns",
+    "gossipsub",
+    "identify",
+    "kad",
+    "quic",
+    "request-response",
+    "secp256k1",
+    "serde",
+] }
+hex = "0.4.3"
+futures = "0.3.31"
+clap = { version = "4.5.31", features = ["derive", "env"] }
