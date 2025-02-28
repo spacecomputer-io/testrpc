@@ -1,0 +1,18 @@
+interval: 1
+iterations: 10
+adapter: hotshot
+args:
+  coordinator_url: http://localhost:3030
+round_templates:
+  4_txs:
+    txs: 4
+    tx_size: 100
+rounds:
+  - rpcs: [0,1,2]
+    template:
+      txs: 1
+      tx_size: 1000
+  - rpcs: [1,2]
+    use_template: 4_txs
+  - rpcs: [3,0]
+    use_template: 4_txs
