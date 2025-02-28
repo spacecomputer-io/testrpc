@@ -35,7 +35,11 @@ pub async fn send_noop(
 ) -> Result<RpcResponse, TestflowError> {
     let as_json = serde_json::to_string(&rpc_request)
         .map_err(|e| TestflowError::RpcError(format!("Failed to serialize request: {e}")))?;
-    tracing::info!("Sending noop request with {} bytes to {}", as_json.len(), rpc_url);
+    tracing::info!(
+        "Sending noop request with {} bytes to {}",
+        as_json.len(),
+        rpc_url
+    );
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     Ok(RpcResponse {
         jsonrpc: "2.0".to_string(),

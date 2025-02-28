@@ -34,7 +34,7 @@ rounds:
     template:
         txs: 10
         tx_size: 1000
-        "#; 
+        "#;
         let cfg = config::parse_config_yaml(raw_cfg_yaml).unwrap();
         let rpc_urls = vec![
             "http://localhost:5000".to_string(),

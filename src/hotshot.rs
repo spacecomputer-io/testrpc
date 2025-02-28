@@ -91,13 +91,7 @@ pub async fn process_round(
         )?;
 
         let handle = tokio::spawn(async move {
-            send_txs(
-                &rpc_url,
-                req_id_clone,
-                template.txs,
-                template.tx_size,
-            )
-            .await
+            send_txs(&rpc_url, req_id_clone, template.txs, template.tx_size).await
         });
 
         handles.push(handle);

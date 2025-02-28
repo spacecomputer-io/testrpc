@@ -26,10 +26,14 @@ impl FromStr for Adapter {
 
 impl Display for Adapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match self {
-            Adapter::Hotshot => "hotshot",
-            Adapter::Libp2p => "libp2p",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                Adapter::Hotshot => "hotshot",
+                Adapter::Libp2p => "libp2p",
+            }
+        )
     }
 }
 

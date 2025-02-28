@@ -24,7 +24,7 @@ async fn main() -> Result<(), common::TestflowError> {
     }
 
     let cfg = config::load_config(opts.file.as_str()).unwrap();
-    let rpc_urls = if opts.dry_run { 
+    let rpc_urls = if opts.dry_run {
         let num_of_nodes = cfg.num_of_nodes.unwrap_or(4);
         let mut urls = Vec::new();
         for i in 0..num_of_nodes {
@@ -39,7 +39,10 @@ async fn main() -> Result<(), common::TestflowError> {
     if let Some(num_of_nodes) = cfg.num_of_nodes {
         let actual_num_of_nodes = rpc_urls.len();
         if actual_num_of_nodes != num_of_nodes {
-            return Err(common::TestflowError::WrongNumberOfNodes(num_of_nodes, actual_num_of_nodes))
+            return Err(common::TestflowError::WrongNumberOfNodes(
+                num_of_nodes,
+                actual_num_of_nodes,
+            ));
         }
     }
 
