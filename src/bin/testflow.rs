@@ -32,8 +32,7 @@ async fn main() -> Result<(), common::TestflowError> {
         }
         urls
     } else {
-        let urls = runner::load_endpoints(cfg.clone()).await.unwrap();
-        urls
+        runner::load_endpoints(cfg.clone()).await.unwrap()
     };
 
     if let Some(num_of_nodes) = cfg.num_of_nodes {

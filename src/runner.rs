@@ -27,13 +27,11 @@ pub async fn run(
     let results = Arc::new(RwLock::new(Vec::new()));
     loop {
         let rounds = cfg.rounds.clone();
-        let mut r: usize = 0;
-        for round in rounds {
+        for (r, round) in rounds.into_iter().enumerate() {
             let round_templates = cfg.round_templates.clone();
             let rpc_urls = rpc_urls.clone();
             let results = Arc::clone(&results);
             i += 1;
-            r += 1;
             let iteration = i;
             let round_num = r;
             let adapter = cfg.adapter.clone();
