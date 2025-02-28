@@ -15,6 +15,9 @@ struct Opts {
 async fn main() -> Result<(), common::TestflowError> {
     tracing_subscriber::fmt::init(); // TODO file
 
+    let start = std::time::Instant::now();
+    tracing::info!("Starting testflow");
+
     let ctx = Arc::new(ctx::Context::new());
 
     let opts: Opts = Opts::parse();
@@ -48,10 +51,15 @@ async fn main() -> Result<(), common::TestflowError> {
     let ctx_cloned = ctx.clone();
     tokio::select! {
         _ = tokio::spawn(async move {
-            let results = runner::run(ctx_cloned, cfg.clone(), rpc_urls)
+            let round_results = runner::run(ctx_cloned, cfg.clone(), rpc_urls)
                 .await
                 .unwrap();
-            println!("---RESULTS--\n{:?}\n--END_RESULTS--\n", results);
+            let time_elapsed = start.elapsed();
+            let results = common::FlowResults::new_from_round_results(round_results, time_elapsed);
+            let results_yaml = serde_yaml::to_string(&results).unwrap();
+            println!("---RESULTS--\n");
+            println!("{}", results_yaml);
+            println!("---END RESULTS--\n");
         }) => {}
         _ = signal::wait_exit_signals() => {
             ctx.stop();

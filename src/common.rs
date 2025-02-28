@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -24,14 +26,36 @@ pub enum TestflowError {
     JoinError(#[from] tokio::task::JoinError),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RoundResults {
     pub sent: usize,
     pub failed: usize,
+    // TODO: bytes
+    // pub bytes_sent: usize,
+    // pub bytes_failed: usize,
 }
 
-pub struct FlowContext {
-    pub iteration: u32,
-    pub rpc_urls: Vec<String>,
-    pub req_id: u64,
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FlowResults {
+    pub rounds: Vec<RoundResults>,
+    pub total: RoundResults,
+    pub total_time: Duration,
+    pub total_iterations: u32,
+}
+
+impl FlowResults {
+    pub fn new_from_round_results(rounds: Vec<RoundResults>, total_time: Duration) -> Self {
+        let total_iterations = rounds.len() as u32;
+        let mut total = RoundResults { sent: 0, failed: 0 };
+        for round in rounds.iter() {
+            total.sent += round.sent;
+            total.failed += round.failed;
+        }
+        Self {
+            rounds,
+            total,
+            total_time,
+            total_iterations,
+        }
+    }
 }
