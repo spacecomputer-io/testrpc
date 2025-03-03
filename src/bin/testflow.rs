@@ -9,6 +9,8 @@ struct Opts {
     file: String,
     #[clap(long, default_value = "false", env = "DRY_RUN")]
     dry_run: bool,
+    #[clap(long, default_value = "false")]
+    gen_mock_rpcs: bool,
 }
 
 #[tokio::main]
@@ -27,7 +29,7 @@ async fn main() -> Result<(), common::TestflowError> {
     }
 
     let cfg = config::load_config(opts.file.as_str()).unwrap();
-    let rpc_urls = if opts.dry_run {
+    let rpc_urls = if opts.dry_run && opts.gen_mock_rpcs {
         let num_of_nodes = cfg.num_of_nodes.unwrap_or(4);
         let mut urls = Vec::new();
         for i in 0..num_of_nodes {

@@ -27,6 +27,11 @@ round_templates:
   10_txs:
     txs: 10
     tx_size: 100
+rpcs:
+    - http://localhost:5000
+    - http://localhost:5001
+    - http://localhost:5002
+    - http://localhost:5003
 rounds:
   - rpcs: [3,0]
     use_template: 10_txs
@@ -36,13 +41,8 @@ rounds:
         tx_size: 1000
         "#;
         let cfg = config::parse_config_yaml(raw_cfg_yaml).unwrap();
-        let rpc_urls = vec![
-            "http://localhost:5000".to_string(),
-            "http://localhost:5001".to_string(),
-            "http://localhost:5002".to_string(),
-            "http://localhost:5003".to_string(),
-        ];
         let ctx = Arc::new(ctx::Context::new());
+        let rpc_urls = runner::load_endpoints(cfg.clone()).await.unwrap();
         let ctx_cloned = ctx.clone();
         let handle = tokio::spawn(async move {
             // wait for the test to complete
