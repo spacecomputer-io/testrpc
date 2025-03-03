@@ -7,6 +7,9 @@ build:
 build-release:
 	@cargo build --release --bin testflow
 
+install:
+	@cargo install --locked --path .
+
 docker-build:
 	@docker build -t ${IMAGE} .
 

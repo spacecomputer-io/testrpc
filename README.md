@@ -59,7 +59,8 @@ rounds: # rounds to run continuously, each round will be an iteration
 You can install the binary on your system with:
 
 ```bash
-cargo install --locked --path .
+make install
+# cargo install --locked --path .
 ```
 
 Or directly from git:
