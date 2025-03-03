@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display, str::FromStr};
-
 use crate::common::TestflowError;
+use serde::{Deserialize, Serialize};
+use serde_yaml::Value;
+use std::{collections::HashMap, fmt::Display, str::FromStr};
 
 /// Adapter to use for the test flow.
 /// The adapter is responsible for providing the actual implementation of the test flow for sending rpcs.
@@ -50,7 +50,9 @@ pub struct Config {
     /// Reusable round templates
     pub round_templates: HashMap<String, RoundTemplate>,
     /// Arguments for the adapter
-    pub args: HashMap<String, String>,
+    pub args: HashMap<String, Value>,
+    /// RPCs to use for sending transactions
+    pub rpcs: Option<Vec<String>>,
     /// Rounds declaration
     pub rounds: Vec<Round>,
 }

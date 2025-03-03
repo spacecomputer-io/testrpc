@@ -8,6 +8,9 @@ use crate::config::{self, Adapter};
 use crate::{ctx, hotshot};
 
 pub async fn load_endpoints(cfg: config::Config) -> Result<Vec<String>, TestflowError> {
+    if let Some(rpcs) = cfg.rpcs {
+        return Ok(rpcs);
+    }
     match cfg.adapter {
         Adapter::Hotshot => hotshot::load_endpoints(cfg.args.clone()).await,
         _ => Err(TestflowError::UnsupportedAdapter(cfg.adapter.to_string())),

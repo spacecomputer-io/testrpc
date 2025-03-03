@@ -31,6 +31,11 @@ num_of_nodes: 4 # expected number of nodes (optional, but recommended to avoid i
 adapter: hotshot # adapter to use
 args: # arguments for the adapter
   coordinator_url: http://127.0.0.1:3030
+# rpcs: # rpcs to use, if not defined, the adapter will load them from the coordinator
+#   - http://localhost:5000
+#   - http://localhost:5001
+#   - http://localhost:5002
+#   - http://localhost:5003
 round_templates: # reusable round templates
   10_txs:
     txs: 10 # number of transactions to send

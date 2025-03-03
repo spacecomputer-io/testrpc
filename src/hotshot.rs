@@ -1,6 +1,7 @@
 use futures::future::join_all;
 use libp2p::Multiaddr;
 use rand::Rng as _;
+use serde_yaml::Value;
 use std::collections::HashMap;
 
 use crate::common::{RoundResults, TestflowError};
@@ -15,22 +16,23 @@ pub struct HotshotArgs {
     pub coordinator_url: String,
 }
 
-impl TryFrom<HashMap<String, String>> for HotshotArgs {
+impl TryFrom<HashMap<String, Value>> for HotshotArgs {
     type Error = TestflowError;
 
-    fn try_from(args: HashMap<String, String>) -> Result<Self, Self::Error> {
-        let coordinator_url = args
-            .get("coordinator_url")
-            .ok_or(TestflowError::MissingArgs("coordinator_url".to_string()))?
-            .clone();
+    fn try_from(args: HashMap<String, Value>) -> Result<Self, Self::Error> {
+        let coordinator_url = match args.get("coordinator_url") {
+            Some(Value::String(coordinator_url)) => coordinator_url.clone(),
+            _ => return Err(TestflowError::MissingArgs("coordinator_url".to_string())),
+        };
 
         Ok(HotshotArgs { coordinator_url })
     }
 }
 
 /// Load the RPC endpoints from the coordinator
-pub async fn load_endpoints(args: HashMap<String, String>) -> Result<Vec<String>, TestflowError> {
+pub async fn load_endpoints(args: HashMap<String, Value>) -> Result<Vec<String>, TestflowError> {
     let HotshotArgs { coordinator_url } = HotshotArgs::try_from(args)?;
+
     tracing::info!("Using coordinator at: {}", coordinator_url.clone());
     // Fetch the known libp2p nodes from the coordinator
     let p2p_info_url = format!("http://{}/libp2p-info", coordinator_url);
