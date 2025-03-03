@@ -53,6 +53,29 @@ rounds: # rounds to run continuously, each round will be an iteration
 
 ## Usage
 
+
+### Install on OS
+
+You can install the binary on your system with:
+
+```bash
+cargo install --locked --path .
+```
+
+Or directly from git:
+
+```bash
+cargo install --git https://github.com/spacecoinxyz/testflow --branch main --locked testflow
+```
+
+Now you can run the binary with the path to the config file:
+
+```bash
+testflow -f my.testflow.yaml
+```
+
+### Build from source
+
 Run with cargo, build the project and run the binary with the path to the config file.
 Use `RUST_LOG` to control the verbosity of the logs:
 
@@ -72,7 +95,7 @@ RUST_LOG=debug cargo run --bin testflow -- -f my.testflow.yaml
 You can run a dry run to see the steps that would be executed, without actually making RPC calls:
 
 ```bash
-RUST_LOG=debug cargo run --bin testflow -- -f $PWD/examples/hotshot.testflow.yaml --dry-run
+RUST_LOG=debug testflow -f $PWD/examples/hotshot.testflow.yaml --dry-run
 ```
 
 ### Development
@@ -89,5 +112,3 @@ Make sure to run fmt and clippy before pushing, they will fail the CI if not pas
 cargo fmt
 cargo clippy
 ```
-
-
