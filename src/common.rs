@@ -3,7 +3,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum TestflowError {
+pub enum TestrpcError {
     #[error("Num of nodes mismatch: expected {0}, got {1}")]
     WrongNumberOfNodes(usize, usize),
     #[error("Unsupported adapter: {0}")]

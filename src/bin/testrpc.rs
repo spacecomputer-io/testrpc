@@ -14,7 +14,7 @@ struct Opts {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), common::TestflowError> {
+async fn main() -> Result<(), common::TestrpcError> {
     tracing_subscriber::fmt::init(); // TODO file
 
     let start = std::time::Instant::now();
@@ -43,7 +43,7 @@ async fn main() -> Result<(), common::TestflowError> {
     if let Some(num_of_nodes) = cfg.num_of_nodes {
         let actual_num_of_nodes = rpc_urls.len();
         if actual_num_of_nodes != num_of_nodes {
-            return Err(common::TestflowError::WrongNumberOfNodes(
+            return Err(common::TestrpcError::WrongNumberOfNodes(
                 num_of_nodes,
                 actual_num_of_nodes,
             ));

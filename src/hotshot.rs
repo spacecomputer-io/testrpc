@@ -4,7 +4,7 @@ use rand::Rng as _;
 use serde_yaml::Value;
 use std::collections::HashMap;
 
-use crate::common::{RoundResults, TestflowError};
+use crate::common::{RoundResults, TestrpcError};
 use crate::config::{Round, RoundTemplate};
 use crate::jrpc;
 
@@ -17,12 +17,12 @@ pub struct HotshotArgs {
 }
 
 impl TryFrom<HashMap<String, Value>> for HotshotArgs {
-    type Error = TestflowError;
+    type Error = TestrpcError;
 
     fn try_from(args: HashMap<String, Value>) -> Result<Self, Self::Error> {
         let coordinator_url = match args.get("coordinator_url") {
             Some(Value::String(coordinator_url)) => coordinator_url.clone(),
-            _ => return Err(TestflowError::MissingArgs("coordinator_url".to_string())),
+            _ => return Err(TestrpcError::MissingArgs("coordinator_url".to_string())),
         };
 
         Ok(HotshotArgs { coordinator_url })
@@ -30,7 +30,7 @@ impl TryFrom<HashMap<String, Value>> for HotshotArgs {
 }
 
 /// Load the RPC endpoints from the coordinator
-pub async fn load_endpoints(args: HashMap<String, Value>) -> Result<Vec<String>, TestflowError> {
+pub async fn load_endpoints(args: HashMap<String, Value>) -> Result<Vec<String>, TestrpcError> {
     let HotshotArgs { coordinator_url } = HotshotArgs::try_from(args)?;
 
     tracing::info!("Using coordinator at: {}", coordinator_url.clone());
@@ -38,14 +38,14 @@ pub async fn load_endpoints(args: HashMap<String, Value>) -> Result<Vec<String>,
     let p2p_info_url = format!("http://{}/libp2p-info", coordinator_url);
     let known_ips = reqwest::get(p2p_info_url.as_str())
         .await
-        .map_err(|e| TestflowError::LoadEndpointsError(e.to_string()))?
+        .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))?
         .text()
         .await
-        .map_err(|e| TestflowError::LoadEndpointsError(e.to_string()))?
+        .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))?
         .split('\n')
         .map(|s| {
             s.parse::<Multiaddr>()
-                .map_err(|e| TestflowError::LoadEndpointsError(e.to_string()))
+                .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))
                 .unwrap()
         })
         .map(|addr| {
@@ -73,14 +73,14 @@ pub async fn process_round(
     iteration: u32,
     rpc_urls: Vec<String>,
     round_templates: HashMap<String, RoundTemplate>,
-) -> Result<RoundResults, TestflowError> {
+) -> Result<RoundResults, TestrpcError> {
     let mut req_id = iteration as u64;
     let mut results = RoundResults { sent: 0, failed: 0 };
     let mut handles = Vec::new();
 
     for rpc in &round.rpcs {
         if rpc_urls.len() <= *rpc {
-            return Err(TestflowError::LoadEndpointsError(format!(
+            return Err(TestrpcError::LoadEndpointsError(format!(
                 "RPC index out of bounds: {}",
                 rpc
             )));
@@ -89,7 +89,7 @@ pub async fn process_round(
         let req_id_clone = req_id;
 
         let template = round.get_template(round_templates.clone()).ok_or(
-            TestflowError::LoadRoundTemplateError("No template found".to_string()),
+            TestrpcError::LoadRoundTemplateError("No template found".to_string()),
         )?;
 
         let handle = tokio::spawn(async move {
@@ -109,7 +109,7 @@ pub async fn process_round(
                 results.failed += round_results.failed;
             }
             Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(TestflowError::ExecutionError(e.to_string())),
+            Err(e) => return Err(TestrpcError::ExecutionError(e.to_string())),
         }
     }
     Ok(results)
@@ -121,7 +121,7 @@ async fn send_txs(
     req_id: u64,
     n: usize,
     tx_size: usize,
-) -> Result<RoundResults, TestflowError> {
+) -> Result<RoundResults, TestrpcError> {
     let mut txs: Vec<String> = Vec::new();
     for _ in 0..n {
         let mut transaction_bytes = vec![0u8; tx_size];

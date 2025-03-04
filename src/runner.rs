@@ -3,17 +3,17 @@ use std::sync::{Arc, RwLock};
 use tokio::task;
 use tokio::time::Duration;
 
-use crate::common::{RoundResults, TestflowError};
+use crate::common::{RoundResults, TestrpcError};
 use crate::config::{self, Adapter};
 use crate::{ctx, hotshot};
 
-pub async fn load_endpoints(cfg: config::Config) -> Result<Vec<String>, TestflowError> {
+pub async fn load_endpoints(cfg: config::Config) -> Result<Vec<String>, TestrpcError> {
     if let Some(rpcs) = cfg.rpcs {
         return Ok(rpcs);
     }
     match cfg.adapter {
         Adapter::Hotshot => hotshot::load_endpoints(cfg.args.clone()).await,
-        _ => Err(TestflowError::UnsupportedAdapter(cfg.adapter.to_string())),
+        _ => Err(TestrpcError::UnsupportedAdapter(cfg.adapter.to_string())),
     }
 }
 
@@ -24,7 +24,7 @@ pub async fn run(
     ctx: Arc<ctx::Context>,
     cfg: config::Config,
     rpc_urls: Vec<String>,
-) -> Result<Vec<RoundResults>, TestflowError> {
+) -> Result<Vec<RoundResults>, TestrpcError> {
     let mut i: u32 = 0;
     let mut quit = ctx.recv();
     let results = Arc::new(RwLock::new(Vec::new()));
@@ -86,11 +86,11 @@ async fn process_round(
     iteration: u32,
     rpc_urls: Vec<String>,
     round_templates: HashMap<String, config::RoundTemplate>,
-) -> Result<RoundResults, TestflowError> {
+) -> Result<RoundResults, TestrpcError> {
     match adapter {
         Adapter::Hotshot => {
             hotshot::process_round(round, iteration, rpc_urls, round_templates).await
         }
-        _ => Err(TestflowError::UnsupportedAdapter(adapter.to_string())),
+        _ => Err(TestrpcError::UnsupportedAdapter(adapter.to_string())),
     }
 }

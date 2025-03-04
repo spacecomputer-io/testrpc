@@ -1,4 +1,4 @@
-use crate::common::TestflowError;
+use crate::common::TestrpcError;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::{collections::HashMap, fmt::Display, str::FromStr};
@@ -13,13 +13,13 @@ pub enum Adapter {
 }
 
 impl FromStr for Adapter {
-    type Err = TestflowError;
+    type Err = TestrpcError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "hotshot" => Ok(Adapter::Hotshot),
             "libp2p" => Ok(Adapter::Libp2p),
-            _ => Err(TestflowError::UnsupportedAdapter(s.to_string())),
+            _ => Err(TestrpcError::UnsupportedAdapter(s.to_string())),
         }
     }
 }
@@ -91,16 +91,16 @@ impl Round {
     }
 }
 
-pub fn load_config(f: &str) -> Result<Config, TestflowError> {
+pub fn load_config(f: &str) -> Result<Config, TestrpcError> {
     let config =
-        std::fs::read_to_string(f).map_err(|e| TestflowError::LoadConfigError(e.to_string(), f.to_string()))?;
+        std::fs::read_to_string(f).map_err(|e| TestrpcError::LoadConfigError(e.to_string(), f.to_string()))?;
     let config: Config = serde_yaml::from_str(config.as_str())
-        .map_err(|e| TestflowError::LoadConfigError(e.to_string(), f.to_string()))?;
+        .map_err(|e| TestrpcError::LoadConfigError(e.to_string(), f.to_string()))?;
     Ok(config)
 }
 
-pub fn parse_config_yaml(raw_cfg_yaml: &str) -> Result<Config, TestflowError> {
+pub fn parse_config_yaml(raw_cfg_yaml: &str) -> Result<Config, TestrpcError> {
     let config: Config = serde_yaml::from_str(raw_cfg_yaml)
-        .map_err(|e| TestflowError::LoadConfigError(e.to_string(), "".to_string()))?;
+        .map_err(|e| TestrpcError::LoadConfigError(e.to_string(), "".to_string()))?;
     Ok(config)
 }

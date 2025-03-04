@@ -3,7 +3,7 @@ use std::env;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::common::TestflowError;
+use crate::common::TestrpcError;
 
 /// RPC request structure
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -32,9 +32,9 @@ pub struct RpcResponse {
 pub async fn send_noop(
     rpc_url: &str,
     rpc_request: RpcRequest,
-) -> Result<RpcResponse, TestflowError> {
+) -> Result<RpcResponse, TestrpcError> {
     let as_json = serde_json::to_string(&rpc_request)
-        .map_err(|e| TestflowError::RpcError(format!("Failed to serialize request: {e}")))?;
+        .map_err(|e| TestrpcError::RpcError(format!("Failed to serialize request: {e}")))?;
     tracing::info!(
         "Sending noop request with {} bytes to {}",
         as_json.len(),
@@ -54,7 +54,7 @@ pub async fn send(
     req_id: u64,
     method: &str,
     params: Value,
-) -> Result<RpcResponse, TestflowError> {
+) -> Result<RpcResponse, TestrpcError> {
     let rpc_request = RpcRequest {
         jsonrpc: "2.0".to_string(),
         method: method.to_string(),
@@ -73,7 +73,7 @@ pub async fn send(
         .json(&rpc_request)
         .send()
         .await
-        .map_err(|e| TestflowError::RpcError(format!("Failed to make request: {e}")))?;
+        .map_err(|e| TestrpcError::RpcError(format!("Failed to make request: {e}")))?;
 
     tracing::info!(
         "Got RPC response after {}ms",
@@ -83,7 +83,7 @@ pub async fn send(
     let response: RpcResponse = response
         .json()
         .await
-        .map_err(|e| TestflowError::RpcError(format!("Failed to parse response: {e}")))?;
+        .map_err(|e| TestrpcError::RpcError(format!("Failed to parse response: {e}")))?;
 
     tracing::debug!("RPC response: {:?}", response);
 

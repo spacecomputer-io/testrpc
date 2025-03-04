@@ -1,14 +1,14 @@
 # testrpc
 
-Test flows orchestration for distributed testing.
+Test flows orchestration for distributed RPC testing.
 
 ## Overview
 
-Testflow is a tool that allows you to define a test flow in a declarative way. The flow is defined in a YAML file that describes the steps to be executed and the dependencies between them.
+Testrpc is a tool that allows you to define a test flow in a declarative way. The flow is defined in a YAML file that describes the steps to be executed and the dependencies between them.
 
 ### Protocol Adapters
 
-Testflow is designed to be protocol agnostic. It uses protocol adapters to interact with the nodes. The adapter is responsible for discovering the rpcs, sending transactions, and collecting metrics.
+Testrpc is designed to be protocol agnostic. It uses protocol adapters to interact with the nodes. The adapter is responsible for discovering the rpcs, sending transactions, and collecting metrics.
 
 The following adapters are available:
 - [x] Hotshot
