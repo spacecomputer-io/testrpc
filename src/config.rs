@@ -93,14 +93,14 @@ impl Round {
 
 pub fn load_config(f: &str) -> Result<Config, TestflowError> {
     let config =
-        std::fs::read_to_string(f).map_err(|e| TestflowError::LoadConfigError(e.to_string()))?;
+        std::fs::read_to_string(f).map_err(|e| TestflowError::LoadConfigError(e.to_string(), f.to_string()))?;
     let config: Config = serde_yaml::from_str(config.as_str())
-        .map_err(|e| TestflowError::LoadConfigError(e.to_string()))?;
+        .map_err(|e| TestflowError::LoadConfigError(e.to_string(), f.to_string()))?;
     Ok(config)
 }
 
 pub fn parse_config_yaml(raw_cfg_yaml: &str) -> Result<Config, TestflowError> {
     let config: Config = serde_yaml::from_str(raw_cfg_yaml)
-        .map_err(|e| TestflowError::LoadConfigError(e.to_string()))?;
+        .map_err(|e| TestflowError::LoadConfigError(e.to_string(), "".to_string()))?;
     Ok(config)
 }

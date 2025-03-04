@@ -8,8 +8,8 @@ pub enum TestflowError {
     WrongNumberOfNodes(usize, usize),
     #[error("Unsupported adapter: {0}")]
     UnsupportedAdapter(String),
-    #[error("Failed to load config: {0}")]
-    LoadConfigError(String),
+    #[error("Failed to load config (file: {1}): {0}")]
+    LoadConfigError(String, String),
     #[error("Missing arguments: {0}")]
     MissingArgs(String),
     #[error("Failed to load endpoints: {0}")]
