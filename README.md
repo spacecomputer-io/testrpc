@@ -1,4 +1,4 @@
-# testflow
+# testrpc
 
 Test flows orchestration for distributed testing.
 
@@ -66,13 +66,13 @@ make install
 Or directly from git:
 
 ```bash
-cargo install --git https://github.com/spacecoinxyz/testflow --branch main --locked testflow
+cargo install --git https://github.com/spacecoinxyz/testrpc --branch main --locked testrpc
 ```
 
 Now you can run the binary with the path to the config file:
 
 ```bash
-testflow -f my.testflow.yaml
+testrpc -f my.testrpc.yaml
 ```
 
 ### Build from source
@@ -82,13 +82,13 @@ Use `RUST_LOG` to control the verbosity of the logs:
 
 ```bash
 cargo build
-RUST_LOG=debug ./target/debug/testflow -f my.testflow.yaml
+RUST_LOG=debug ./target/debug/testrpc -f my.testrpc.yaml
 ```
 
 Or directly with cargo:
 
 ```bash
-RUST_LOG=debug cargo run --bin testflow -- -f my.testflow.yaml
+RUST_LOG=debug cargo run --bin testrpc -- -f my.testrpc.yaml
 ```
 
 ### Dry run
@@ -96,7 +96,7 @@ RUST_LOG=debug cargo run --bin testflow -- -f my.testflow.yaml
 You can run a dry run to see the steps that would be executed, without actually making RPC calls:
 
 ```bash
-RUST_LOG=debug testflow -f $PWD/examples/hotshot.testflow.yaml --dry-run
+RUST_LOG=debug testrpc -f $PWD/examples/hotshot.testrpc.yaml --dry-run
 ```
 
 ### Development

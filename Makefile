@@ -1,11 +1,11 @@
-CONTAINER?=testflow
-IMAGE?=testflow
+CONTAINER?=testrpc
+IMAGE?=testrpc
 
 build:
-	@cargo build --bin testflow
+	@cargo build --bin testrpc
 
 build-release:
-	@cargo build --release --bin testflow
+	@cargo build --release --bin testrpc
 
 install:
 	@cargo install --locked --path .

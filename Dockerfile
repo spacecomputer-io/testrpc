@@ -27,8 +27,8 @@ RUN --mount=type=bind,source=src,target=src \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
     <<EOF
 set -e
-cargo build --locked --release --bin testflow
-cp ./target/release/testflow /bin/testflow
+cargo build --locked --release --bin testrpc
+cp ./target/release/testrpc /bin/testrpc
 EOF
 
 ################################################################################
@@ -36,6 +36,6 @@ EOF
 FROM debian:bullseye-slim AS final
 
 
-COPY --from=build /bin/testflow /bin/testflow
+COPY --from=build /bin/testrpc /bin/testrpc
 
-ENTRYPOINT ["/bin/testflow"]
+ENTRYPOINT ["/bin/testrpc"]

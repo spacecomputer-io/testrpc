@@ -1,11 +1,11 @@
 use clap::Parser;
 use std::{env, sync::Arc};
 
-use testflow::{common, config, ctx, runner, signal};
+use testrpc::{common, config, ctx, runner, signal};
 
 #[derive(Parser)]
 struct Opts {
-    #[clap(short = 'f', long, default_value = "hotshot.testflow.yaml")]
+    #[clap(short = 'f', long, default_value = "hotshot.testrpc.yaml")]
     file: String,
     #[clap(long, default_value = "false", env = "DRY_RUN")]
     dry_run: bool,
@@ -18,7 +18,7 @@ async fn main() -> Result<(), common::TestflowError> {
     tracing_subscriber::fmt::init(); // TODO file
 
     let start = std::time::Instant::now();
-    tracing::info!("Starting testflow");
+    tracing::info!("Starting testrpc");
 
     let ctx = Arc::new(ctx::Context::new());
 
