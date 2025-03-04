@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::{env, sync::Arc};
 
-use testrpc::{common, config, ctx, runner, signal};
+use testrpc::{common, config, ctx, logging, runner, signal};
 
 #[derive(Parser)]
 struct Opts {
@@ -15,7 +15,7 @@ struct Opts {
 
 #[tokio::main]
 async fn main() -> Result<(), common::TestrpcError> {
-    tracing_subscriber::fmt::init(); // TODO file
+    let _log_guard = logging::initialize_logging();
 
     let start = std::time::Instant::now();
     tracing::info!("Starting testrpc");

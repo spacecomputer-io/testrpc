@@ -3,6 +3,7 @@ pub mod config;
 pub mod ctx;
 pub mod hotshot;
 pub mod jrpc;
+pub mod logging;
 pub mod runner;
 pub mod signal;
 
