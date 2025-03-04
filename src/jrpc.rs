@@ -69,7 +69,7 @@ pub async fn send(
     let start_time = std::time::Instant::now();
 
     let response = client
-        .post(format!("http://{rpc_url}"))
+        .post(rpc_url)
         .json(&rpc_request)
         .send()
         .await
