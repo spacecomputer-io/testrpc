@@ -36,12 +36,26 @@ pub async fn load_endpoints(args: HashMap<String, Value>) -> Result<Vec<String>,
     tracing::info!("Using coordinator at: {}", coordinator_url.clone());
     // Fetch the known libp2p nodes from the coordinator
     let p2p_info_url = format!("http://{}/libp2p-info", coordinator_url);
-    let known_ips = reqwest::get(p2p_info_url.as_str())
+    let resp = reqwest::get(p2p_info_url.as_str())
         .await
         .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))?
         .text()
         .await
-        .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))?
+        .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))?;
+    let known_ips = parse_endpoints(resp.as_str());
+    // Print the known libp2p nodes
+    tracing::info!("Known libp2p nodes: {:?}", known_ips);
+
+    let rpc_urls = known_ips
+        .iter()
+        .map(|ip| format!("http://{}:5000", ip.clone()))
+        .collect::<Vec<_>>();
+
+    Ok(rpc_urls)
+}
+
+fn parse_endpoints(endpoints: &str) -> Vec<String> {
+    endpoints
         .split('\n')
         .map(|s| {
             s.parse::<Multiaddr>()
@@ -53,18 +67,14 @@ pub async fn load_endpoints(args: HashMap<String, Value>) -> Result<Vec<String>,
             if components.len() < 2 {
                 return addr.to_string();
             }
-            components[0].to_string()
+            let ip_addr = components[0].to_string();
+            if ip_addr.len() < 6 {
+                return addr.to_string();
+            }
+            // "/ip4/*.*.*.*" -> "*.*.*.*"
+            ip_addr[5..].to_string()
         })
-        .collect::<Vec<_>>();
-    // Print the known libp2p nodes
-    tracing::info!("Known libp2p nodes: {:?}", known_ips);
-
-    let rpc_urls = known_ips
-        .iter()
-        .map(|ip| format!("http://{}:5000", ip.clone()))
-        .collect::<Vec<_>>();
-
-    Ok(rpc_urls)
+        .collect::<Vec<_>>()
 }
 
 /// Process a single round, sending transactions to the RPC servers concurrently
@@ -137,4 +147,45 @@ async fn send_txs(
     .await?;
 
     Ok(RoundResults { sent: n, failed: 0 })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_parse_endpoints() {
+        let resp = r#"/ip4/192.168.104.3/udp/3000/quic-v1/p2p/12D3KooWPnJybf5PYvQBYeVrFPRR4BfzPzHohdtBp5R4372CPcNp
+/ip4/192.168.104.4/udp/3000/quic-v1/p2p/12D3KooWSe24subEEphVfaCzuQhZtmKRpAqbNm12BNFkCPe2fauF
+/ip4/192.168.104.5/udp/3000/quic-v1/p2p/12D3KooWMhCH2B3bWm9TVzvtntPVMyctNgiNb2GKKWFjxBxqD1md"#;
+        let known_ips = parse_endpoints(resp);
+        assert_eq!(known_ips.len(), 3);
+        assert_eq!(known_ips[0], "192.168.104.3");
+        assert_eq!(known_ips[1], "192.168.104.4");
+        assert_eq!(known_ips[2], "192.168.104.5");
+    }
+
+    #[tokio::test]
+    async fn test_process_round() {
+        // set DRY_RUN to avoid sending requests
+        std::env::set_var("DRY_RUN", "true");
+        let round = Round {
+            rpcs: vec![0],
+            repeat: Some(1),
+            template: Some(RoundTemplate {
+                txs: 1,
+                tx_size: 1,
+                latency: None,
+            }),
+            use_template: None,
+        };
+        let rpc_urls = vec!["http://localhost:5000".to_string()];
+        let round_templates = HashMap::new();
+        let results = process_round(round, 0, rpc_urls, round_templates)
+            .await
+            .unwrap();
+        assert_eq!(results.sent, 1);
+        assert_eq!(results.failed, 0);
+    }
 }
