@@ -3,7 +3,7 @@ use std::{env, sync::Arc};
 
 use testrpc::{common, config, ctx, logging, runner, signal};
 
-#[derive(Parser)]
+#[derive(Parser, Debug, Clone)]
 struct Opts {
     #[clap(short = 'f', long, default_value = "hotshot.testrpc.yaml")]
     file: String,
@@ -11,18 +11,30 @@ struct Opts {
     dry_run: bool,
     #[clap(long, default_value = "false")]
     gen_mock_rpcs: bool,
+    #[clap(long)]
+    log_file: Option<String>,
+    #[clap(long, default_value = "debug")]
+    log_level: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), common::TestrpcError> {
-    let _log_guard = logging::initialize_logging();
-
-    let start = std::time::Instant::now();
-    tracing::info!("Starting testrpc");
-
-    let ctx = Arc::new(ctx::Context::new());
-
     let opts: Opts = Opts::parse();
+    if let Some(log_file) = opts.log_file {
+        env::set_var("RUST_LOG_FILE", log_file.clone());
+        println!("Using log file: {}", log_file.clone());
+    } else {
+        println!("Output log to stdout");
+    }
+    env::set_var("RUST_LOG", opts.log_level.clone());
+    println!("Using log level: {}", &opts.log_level);
+
+    let _log_guard = logging::initialize_logging();
+    let ctx = Arc::new(ctx::Context::new());
+    let start = std::time::Instant::now();
+
+    tracing::info!("Starting testrpc with config file: {}", &opts.file);
+
     if opts.dry_run {
         tracing::info!("Dry run, we will not send any RPCs");
         env::set_var("DRY_RUN", "true");
