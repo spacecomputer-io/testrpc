@@ -3,35 +3,35 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::{collections::HashMap, fmt::Display, str::FromStr};
 
-/// Adapter to use for the test flow.
+/// AdapterConfig to use for the test flow.
 /// The adapter is responsible for providing the actual implementation of the test flow for sending rpcs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum Adapter {
+pub enum AdapterConfig {
     Hotshot,
     Libp2p, // TODO: Implement libp2p adapter
 }
 
-impl FromStr for Adapter {
+impl FromStr for AdapterConfig {
     type Err = TestrpcError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "hotshot" => Ok(Adapter::Hotshot),
-            "libp2p" => Ok(Adapter::Libp2p),
+            "hotshot" => Ok(AdapterConfig::Hotshot),
+            "libp2p" => Ok(AdapterConfig::Libp2p),
             _ => Err(TestrpcError::UnsupportedAdapter(s.to_string())),
         }
     }
 }
 
-impl Display for Adapter {
+impl Display for AdapterConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "{}",
             match self {
-                Adapter::Hotshot => "hotshot",
-                Adapter::Libp2p => "libp2p",
+                AdapterConfig::Hotshot => "hotshot",
+                AdapterConfig::Libp2p => "libp2p",
             }
         )
     }
@@ -46,7 +46,7 @@ pub struct Config {
     /// Number of expected nodes
     pub num_of_nodes: Option<usize>,
     /// Protocol adapter to use (hotshot)
-    pub adapter: Adapter,
+    pub adapter: AdapterConfig,
     /// Reusable round templates
     pub round_templates: HashMap<String, RoundTemplate>,
     /// Arguments for the adapter

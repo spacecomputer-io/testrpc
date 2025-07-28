@@ -72,7 +72,7 @@ async fn main() -> Result<(), common::TestrpcError> {
             let results = common::FlowResults::new_from_round_results(round_results, time_elapsed);
             let results_yaml = serde_yaml::to_string(&results).unwrap();
             println!("---RESULTS--\n");
-            println!("{}", results_yaml);
+            println!("{results_yaml}");
             println!("---END RESULTS--\n");
         }) => {}
         _ = signal::wait_exit_signals() => {

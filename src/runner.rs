@@ -1,20 +1,23 @@
+use futures::future::join_all;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tokio::task;
 use tokio::time::Duration;
 
+use crate::adapters::Adapter;
 use crate::common::{RoundResults, TestrpcError};
-use crate::config::{self, Adapter};
-use crate::{ctx, hotshot};
+use crate::config::{self, AdapterConfig};
+use crate::{adapters, ctx};
 
 pub async fn load_endpoints(cfg: config::Config) -> Result<Vec<String>, TestrpcError> {
     if let Some(rpcs) = cfg.rpcs {
         return Ok(rpcs);
     }
-    match cfg.adapter {
-        Adapter::Hotshot => hotshot::load_endpoints(cfg.args.clone()).await,
-        _ => Err(TestrpcError::UnsupportedAdapter(cfg.adapter.to_string())),
-    }
+    let adapter = adapters::new_adapter(cfg.adapter)?;
+    adapter
+        .load_endpoints(cfg.args.clone())
+        .await
+        .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))
 }
 
 /// Run the test flow with the given configuration.
@@ -65,12 +68,14 @@ pub async fn run(
             }
             if let Some(iterations) = cfg.iterations {
                 if i >= iterations as u32 {
+                    tracing::debug!("Reached max iterations: {}", i);
                     break;
                 }
             }
         }
         if let Some(iterations) = cfg.iterations {
             if i >= iterations as u32 {
+                tracing::debug!("Reached max iterations: {}", i);
                 break;
             }
         }
@@ -81,16 +86,96 @@ pub async fn run(
 
 /// Process a single round, sending transactions to the RPC servers concurrently
 async fn process_round(
-    adapter: Adapter,
+    cfg: AdapterConfig,
     round: config::Round,
     iteration: u32,
     rpc_urls: Vec<String>,
     round_templates: HashMap<String, config::RoundTemplate>,
 ) -> Result<RoundResults, TestrpcError> {
-    match adapter {
-        Adapter::Hotshot => {
-            hotshot::process_round(round, iteration, rpc_urls, round_templates).await
+    let mut req_id = iteration as u64;
+    let mut results = RoundResults { sent: 0, failed: 0 };
+    let mut handles = Vec::new();
+
+    let adapter = adapters::new_adapter(cfg)?;
+
+    for rpc in &round.rpcs {
+        if rpc_urls.len() <= *rpc {
+            return Err(TestrpcError::LoadEndpointsError(format!(
+                "RPC index out of bounds: {rpc}"
+            )));
         }
-        _ => Err(TestrpcError::UnsupportedAdapter(adapter.to_string())),
+        let rpc_url = rpc_urls[*rpc].clone();
+        let req_id_clone = req_id;
+
+        let template = round.get_template(round_templates.clone()).ok_or(
+            TestrpcError::LoadRoundTemplateError("No template found".to_string()),
+        )?;
+
+        let adapter = adapter.clone();
+        let handle = tokio::spawn(async move {
+            adapter
+                .send_txs(
+                    &rpc_url,
+                    req_id_clone,
+                    iteration,
+                    template.txs,
+                    template.tx_size,
+                )
+                .await
+        });
+
+        handles.push(handle);
+        req_id += 1;
+    }
+
+    let results_vec = join_all(handles).await;
+
+    for result in results_vec {
+        match result {
+            Ok(Ok(round_results)) => {
+                results.sent += round_results.sent;
+                results.failed += round_results.failed;
+            }
+            Ok(Err(e)) => return Err(e),
+            Err(e) => return Err(TestrpcError::ExecutionError(e.to_string())),
+        }
+    }
+    Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::{Round, RoundTemplate};
+
+    use super::*;
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn test_process_round() {
+        // set DRY_RUN to avoid sending requests
+        std::env::set_var("DRY_RUN", "true");
+        let round = Round {
+            rpcs: vec![0],
+            repeat: Some(1),
+            template: Some(RoundTemplate {
+                txs: 1,
+                tx_size: 1,
+                latency: None,
+            }),
+            use_template: None,
+        };
+        let rpc_urls = vec!["http://localhost:5000".to_string()];
+        let round_templates = HashMap::new();
+        let results = process_round(
+            config::AdapterConfig::Hotshot,
+            round,
+            0,
+            rpc_urls,
+            round_templates,
+        )
+        .await
+        .unwrap();
+        assert_eq!(results.sent, 1);
+        assert_eq!(results.failed, 0);
     }
 }
