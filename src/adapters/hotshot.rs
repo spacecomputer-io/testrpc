@@ -4,6 +4,7 @@ use libp2p::Multiaddr;
 use rand::Rng as _;
 use serde_yaml::Value;
 use std::collections::HashMap;
+use std::{pin::Pin, future::Future};
 
 use crate::common::{RoundResults, TestrpcError};
 use crate::jrpc;
@@ -53,60 +54,65 @@ impl Default for HotshotAdapter {
 }
 
 impl Adapter for HotshotAdapter {
-    async fn load_endpoints(
+    fn load_endpoints(
         &self,
         args: HashMap<String, Value>,
-    ) -> Result<Vec<String>, TestrpcError> {
-        let HotshotArgs {
-            coordinator_url,
-            rpc_port,
-        } = HotshotArgs::try_from(args)?;
-        tracing::info!("Using coordinator at: {}", coordinator_url.clone());
-        // Fetch the known libp2p nodes from the coordinator
-        let p2p_info_url = format!("http://{coordinator_url}/libp2p-info");
-        let resp = reqwest::get(p2p_info_url.as_str())
-            .await
-            .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))?
-            .text()
-            .await
-            .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))?;
-        let known_ips = parse_endpoints(resp.as_str())?;
-        // Print the known libp2p nodes
-        tracing::info!("Known libp2p nodes: {:?}", known_ips);
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, TestrpcError>> + Send + '_>> {
+        Box::pin(async move {
+            let HotshotArgs {
+                coordinator_url,
+                rpc_port,
+            } = HotshotArgs::try_from(args)?;
+            tracing::info!("Using coordinator at: {}", coordinator_url.clone());
+            // Fetch the known libp2p nodes from the coordinator
+            let p2p_info_url = format!("http://{coordinator_url}/libp2p-info");
+            let resp = reqwest::get(p2p_info_url.as_str())
+                .await
+                .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))?
+                .text()
+                .await
+                .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))?;
+            let known_ips = parse_endpoints(resp.as_str())?;
+            // Print the known libp2p nodes
+            tracing::info!("Known libp2p nodes: {:?}", known_ips);
 
-        let rpc_urls = known_ips
-            .iter()
-            .map(|ip| format!("http://{ip}:{rpc_port}"))
-            .collect::<Vec<_>>();
+            let rpc_urls = known_ips
+                .iter()
+                .map(|ip| format!("http://{ip}:{rpc_port}"))
+                .collect::<Vec<_>>();
 
-        Ok(rpc_urls)
+            Ok(rpc_urls)
+        })
     }
 
-    async fn send_txs(
+    fn send_txs(
         &self,
         rpc_url: &str,
         req_id: u64,
         _iteration: u32,
         num_txs: usize,
         tx_size: usize,
-    ) -> Result<RoundResults, TestrpcError> {
-        let mut txs: Vec<String> = Vec::new();
-        for _ in 0..num_txs {
-            let mut transaction_bytes = vec![0u8; tx_size];
-            rand::rng().fill(&mut transaction_bytes[..]);
-            txs.push(hex::encode(transaction_bytes));
-        }
-        let _ = jrpc::send(
-            rpc_url,
-            req_id,
-            RPC_METHOD,
-            serde_json::json!({ "txs": txs }),
-        )
-        .await?;
+    ) -> Pin<Box<dyn Future<Output = Result<RoundResults, TestrpcError>> + Send + '_>> {
+        let rpc_url = rpc_url.to_string();
+        Box::pin(async move {
+            let mut txs: Vec<String> = Vec::new();
+            for _ in 0..num_txs {
+                let mut transaction_bytes = vec![0u8; tx_size];
+                rand::rng().fill(&mut transaction_bytes[..]);
+                txs.push(hex::encode(transaction_bytes));
+            }
+            let _ = jrpc::send(
+                &rpc_url,
+                req_id,
+                RPC_METHOD,
+                serde_json::json!({ "txs": txs }),
+            )
+            .await?;
 
-        Ok(RoundResults {
-            sent: num_txs,
-            failed: 0,
+            Ok(RoundResults {
+                sent: num_txs,
+                failed: 0,
+            })
         })
     }
 }

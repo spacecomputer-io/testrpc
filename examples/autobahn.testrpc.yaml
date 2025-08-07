@@ -1,0 +1,15 @@
+interval: 1
+iterations: 10
+adapter: autobahn
+args:
+  # Autobahn authorities configuration file
+  nodes_config_file: "examples/autobahn-authorities.json"
+
+round_templates:
+  default_batch:
+    txs: 60000
+    tx_size: 512
+
+rounds:
+  - rpcs: [0, 1, 2, 3]
+    use_template: default_batch

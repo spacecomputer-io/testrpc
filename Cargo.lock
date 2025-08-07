@@ -2005,6 +2005,7 @@ dependencies = [
 name = "testrpc"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "clap",
  "futures",
  "hex",
@@ -2016,6 +2017,7 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.12",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

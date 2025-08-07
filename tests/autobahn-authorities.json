@@ -1,0 +1,72 @@
+{
+  "authorities": {
+    "A5SEohKIbM4PghTT7TTLHvMVDCzM2SqaEzlIDSSryT0=": {
+      "consensus": {
+        "consensus_to_consensus": "192.168.104.7:3000"
+      },
+      "primary": {
+        "primary_to_primary": "192.168.104.7:3001",
+        "worker_to_primary": "192.168.104.7:3002"
+      },
+      "stake": 1,
+      "workers": {
+        "0": {
+          "primary_to_worker": "192.168.104.7:3003",
+          "transactions": "127.0.0.1:4000",
+          "worker_to_worker": "192.168.104.7:3005"
+        }
+      }
+    },
+    "FIRvZJsAQahX0XqIfcd/uCHjVzKNpfNWIaHy26Wxy4Y=": {
+      "consensus": {
+        "consensus_to_consensus": "192.168.104.8:3006"
+      },
+      "primary": {
+        "primary_to_primary": "192.168.104.8:3007",
+        "worker_to_primary": "192.168.104.8:3008"
+      },
+      "stake": 1,
+      "workers": {
+        "0": {
+          "primary_to_worker": "192.168.104.8:3009",
+          "transactions": "127.0.0.1:4001",
+          "worker_to_worker": "192.168.104.8:3011"
+        }
+      }
+    },
+    "NRvXTY+zCN9J+6spD+mXvQpw4hs5pdq/eTkbOQAPABo=": {
+      "consensus": {
+        "consensus_to_consensus": "192.168.104.9:3012"
+      },
+      "primary": {
+        "primary_to_primary": "192.168.104.9:3013",
+        "worker_to_primary": "192.168.104.9:3014"
+      },
+      "stake": 1,
+      "workers": {
+        "0": {
+          "primary_to_worker": "192.168.104.9:3015",
+          "transactions": "127.0.0.1:4002",
+          "worker_to_worker": "192.168.104.9:3017"
+        }
+      }
+    },
+    "kyTk8l826qEivMdcNegpruLtF1yxiUuX63XqGZqYBBg=": {
+      "consensus": {
+        "consensus_to_consensus": "192.168.104.10:3018"
+      },
+      "primary": {
+        "primary_to_primary": "192.168.104.10:3019",
+        "worker_to_primary": "192.168.104.10:3020"
+      },
+      "stake": 1,
+      "workers": {
+        "0": {
+          "primary_to_worker": "192.168.104.10:3021",
+          "transactions": "127.0.0.1:4003",
+          "worker_to_worker": "192.168.104.10:3023"
+        }
+      }
+    }
+  }
+}

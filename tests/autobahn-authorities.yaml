@@ -1,0 +1,18 @@
+interval: 1
+iterations: 2
+adapter: autobahn
+args:
+  nodes_config_file: "tests/autobahn-authorities.json"
+
+round_templates:
+  multi_node:
+    txs: 3
+    tx_size: 128
+
+rounds:
+  - rpcs: [0, 1]
+    template:
+      txs: 1
+      tx_size: 64
+  - rpcs: [2, 3]
+    use_template: multi_node
