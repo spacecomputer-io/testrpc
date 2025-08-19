@@ -2,17 +2,17 @@
 
 ################################################################################
 
-ARG RUST_VERSION=1.82.0
+ARG RUST_VERSION=1.85.0
 
 FROM rust:${RUST_VERSION}-slim-bullseye AS build
 
 WORKDIR /app
 
 # Install the required dependencies for the build
-# RUN apt-get update && apt-get install -y \
-#     build-essential \
-#     pkg-config \
-#     libssl-dev
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    pkg-config \
+    libssl-dev
 
 # Leverage a cache mount to /usr/local/cargo/registry/
 # for downloaded dependencies and a cache mount to /app/target/ for 
@@ -27,14 +27,13 @@ RUN --mount=type=bind,source=src,target=src \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
     <<EOF
 set -e
-cargo build --locked --release --bin testrpc
+cargo build --release --bin testrpc
 cp ./target/release/testrpc /bin/testrpc
 EOF
 
 ################################################################################
 
 FROM debian:bullseye-slim AS final
-
 
 COPY --from=build /bin/testrpc /bin/testrpc
 
