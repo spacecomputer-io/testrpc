@@ -15,6 +15,8 @@ struct Opts {
     log_file: Option<String>,
     #[clap(long, default_value = "debug")]
     log_level: String,
+    #[clap(long, default_value = "10")]
+    init_retries: u32,
 }
 
 #[tokio::main]
@@ -33,7 +35,7 @@ async fn main() -> Result<(), common::TestrpcError> {
     let ctx = Arc::new(ctx::Context::new());
     let start = std::time::Instant::now();
 
-    tracing::info!("Starting testrpc with config file: {}", &opts.file);
+    tracing::info!("XXX1 Starting testrpc with config file: {}", &opts.file);
 
     if opts.dry_run {
         tracing::info!("Dry run, we will not send any RPCs");
@@ -41,7 +43,11 @@ async fn main() -> Result<(), common::TestrpcError> {
     }
 
     let cfg = config::load_config(opts.file.as_str()).unwrap();
-    let rpc_urls = if opts.dry_run && opts.gen_mock_rpcs {
+    let retries = opts.init_retries;
+    let cfg_rpcs = cfg.clone().rpcs.unwrap_or(Vec::new());
+    let rpc_urls = if cfg_rpcs.len() > 0 {
+        cfg_rpcs
+    } else if opts.dry_run && opts.gen_mock_rpcs {
         let num_of_nodes = cfg.num_of_nodes.unwrap_or(4);
         let mut urls = Vec::new();
         for i in 0..num_of_nodes {
@@ -49,7 +55,15 @@ async fn main() -> Result<(), common::TestrpcError> {
         }
         urls
     } else {
-        runner::load_endpoints(cfg.clone()).await.unwrap()
+        let cfg_clone = cfg.clone();
+        let urls = common::retry(retries as usize, std::time::Duration::from_secs(1), 
+            || Box::pin(runner::load_endpoints(cfg_clone.clone())), true).await.unwrap_or(Vec::new());
+        if urls.is_empty() {
+            return Err(common::TestrpcError::LoadEndpointsError(
+                format!("Failed to load RPC endpoints after {retries} retries"),
+            ));
+        }
+        urls
     };
 
     if let Some(num_of_nodes) = cfg.num_of_nodes {

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{future::Future, time::Duration, pin::Pin};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -58,4 +58,29 @@ impl FlowResults {
             total_iterations,
         }
     }
+}
+
+/// Retry a given operation a specified number of times with a delay between attempts 
+/// and optional exponential backoff.
+/// Returns Ok(()) if successful, or an error if all retries fail.
+pub async fn retry<T: Send + 'static>(
+    retries: usize,
+    delay: Duration,
+    mut operation: impl FnMut() -> Pin<Box<dyn Future<Output = Result<T, TestrpcError>> + Send>>,
+    exponential_backoff: bool,
+) -> Result<T, TestrpcError> {
+    let mut delay = delay;
+    for _ in 0..retries {
+        match operation().await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                tracing::warn!("Operation failed: {}. Retrying in {:?}...", e, delay);
+                tokio::time::sleep(delay).await;
+                if exponential_backoff {
+                    delay *= 2;
+                }
+            }
+        }
+    }
+    Err(TestrpcError::ExecutionError("Max retries reached".to_string()))
 }

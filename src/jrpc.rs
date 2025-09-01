@@ -80,6 +80,8 @@ pub async fn send(
         start_time.elapsed().as_millis()
     );
 
+    tracing::debug!("Raw RPC response: {:?}", response);
+
     let response: RpcResponse = response
         .json()
         .await
