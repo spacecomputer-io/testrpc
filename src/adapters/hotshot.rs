@@ -79,6 +79,11 @@ impl Adapter for HotshotAdapter {
             .map(|ip| format!("http://{ip}:{rpc_port}"))
             .collect::<Vec<_>>();
 
+        if rpc_urls.is_empty() {
+            return Err(TestrpcError::LoadEndpointsError(
+                "No RPC endpoints found".to_string(),
+            ));
+        }
         Ok(rpc_urls)
     }
 
@@ -134,6 +139,7 @@ fn parse_endpoints(endpoints: &str) -> Result<Vec<String>, TestrpcError> {
             // "/ip4/*.*.*.*" -> "*.*.*.*"
             ip_addr[5..].to_string()
         })
+        .filter(|s| !s.is_empty())
         .collect::<Vec<_>>();
 
     Ok(addrs)
