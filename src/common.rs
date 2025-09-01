@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{future::Future, time::Duration, pin::Pin};
+use std::{future::Future, pin::Pin, time::Duration};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -60,7 +60,7 @@ impl FlowResults {
     }
 }
 
-/// Retry a given operation a specified number of times with a delay between attempts 
+/// Retry a given operation a specified number of times with a delay between attempts
 /// and optional exponential backoff.
 /// Returns Ok(()) if successful, or an error if all retries fail.
 pub async fn retry<T: Send + 'static>(
@@ -82,5 +82,7 @@ pub async fn retry<T: Send + 'static>(
             }
         }
     }
-    Err(TestrpcError::ExecutionError("Max retries reached".to_string()))
+    Err(TestrpcError::ExecutionError(
+        "Max retries reached".to_string(),
+    ))
 }

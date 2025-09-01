@@ -44,8 +44,8 @@ async fn main() -> Result<(), common::TestrpcError> {
 
     let cfg = config::load_config(opts.file.as_str()).unwrap();
     let retries = opts.init_retries;
-    let cfg_rpcs = cfg.clone().rpcs.unwrap_or(Vec::new());
-    let rpc_urls = if cfg_rpcs.len() > 0 {
+    let cfg_rpcs = cfg.clone().rpcs.unwrap_or_default();
+    let rpc_urls = if cfg_rpcs.is_empty() {
         cfg_rpcs
     } else if opts.dry_run && opts.gen_mock_rpcs {
         let num_of_nodes = cfg.num_of_nodes.unwrap_or(4);
@@ -56,12 +56,18 @@ async fn main() -> Result<(), common::TestrpcError> {
         urls
     } else {
         let cfg_clone = cfg.clone();
-        let urls = common::retry(retries as usize, std::time::Duration::from_secs(1), 
-            || Box::pin(runner::load_endpoints(cfg_clone.clone())), true).await.unwrap_or(Vec::new());
+        let urls = common::retry(
+            retries as usize,
+            std::time::Duration::from_secs(1),
+            || Box::pin(runner::load_endpoints(cfg_clone.clone())),
+            true,
+        )
+        .await
+        .unwrap_or(Vec::new());
         if urls.is_empty() {
-            return Err(common::TestrpcError::LoadEndpointsError(
-                format!("Failed to load RPC endpoints after {retries} retries"),
-            ));
+            return Err(common::TestrpcError::LoadEndpointsError(format!(
+                "Failed to load RPC endpoints after {retries} retries"
+            )));
         }
         urls
     };
