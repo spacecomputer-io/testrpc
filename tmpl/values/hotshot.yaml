@@ -1,0 +1,4 @@
+coordinator_addr: coordinator
+node_addr_tmpl: hotshot-%d
+tx_per_sec: 100
+tx_size: 1000
