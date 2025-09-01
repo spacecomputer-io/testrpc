@@ -51,6 +51,14 @@ rounds: # rounds to run continuously, each round will be an iteration
         tx_size: 200
 ```
 
+#### Generating Config Files
+
+To generate a config file from a template, you can use the `tmpl.py` script:
+
+```bash
+python3 ./scripts/tmpl.py ./tmpl/hotshot.testrpc.yaml.j2 ./tmpl/values/hotshot.yaml --num-nodes 10
+```
+
 ## Usage
 
 

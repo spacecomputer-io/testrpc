@@ -1,0 +1,23 @@
+interval: 1
+iterations: 100
+adapter: hotshot
+args:
+{%- if coordinator_addr %}
+  coordinator_url: {{ coordinator_addr }}:3030
+{%- endif %}
+num_of_nodes: {{ num_nodes }}
+{%- if node_addr_tmpl %}
+rpcs:
+{%- for i in range(1, num_nodes + 1) %}
+  - http://{{ node_addr_tmpl | format(i) }}:{{ i + 5000 }}
+{%- endfor %}
+{%- endif %}
+round_templates:
+  tmpl:
+    txs: {{ tx_per_sec }}
+    tx_size: {{ tx_size }}
+rounds:
+{%- for i in range(0, num_nodes) %}
+  - rpcs: [{{ i }}]
+    use_template: tmpl
+{%- endfor %}
