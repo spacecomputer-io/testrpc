@@ -55,6 +55,9 @@ pub struct Config {
     pub rpcs: Option<Vec<String>>,
     /// Rounds declaration
     pub rounds: Vec<Round>,
+    /// Timeout for each RPC request in seconds
+    /// If None, defaults to 15 seconds
+    pub timeout: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

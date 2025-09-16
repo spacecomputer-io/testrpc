@@ -54,6 +54,7 @@ pub async fn send(
     req_id: u64,
     method: &str,
     params: Value,
+    timeout: Option<std::time::Duration>,
 ) -> Result<RpcResponse, TestrpcError> {
     let rpc_request = RpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -64,7 +65,10 @@ pub async fn send(
     if env::var("DRY_RUN").is_ok() {
         return send_noop(rpc_url, rpc_request).await;
     }
-    let client = reqwest::Client::new();
+    let client = reqwest::ClientBuilder::new()
+        .timeout(timeout.unwrap_or(std::time::Duration::from_secs(15)))
+        .build()
+        .map_err(|e| TestrpcError::RpcError(format!("Failed to build client: {e}")))?;
 
     let start_time = std::time::Instant::now();
 
