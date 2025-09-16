@@ -121,3 +121,7 @@ Make sure to run fmt and clippy before pushing, they will fail the CI if not pas
 cargo fmt
 cargo clippy
 ```
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
