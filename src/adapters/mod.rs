@@ -24,6 +24,7 @@ pub trait Adapter {
         iteration: u32,
         num_txs: usize,
         tx_size: usize,
+        timeout: Option<std::time::Duration>,
     ) -> impl std::future::Future<Output = Result<common::RoundResults, common::TestrpcError>> + Send;
 }
 

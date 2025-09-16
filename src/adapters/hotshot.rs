@@ -94,6 +94,7 @@ impl Adapter for HotshotAdapter {
         _iteration: u32,
         num_txs: usize,
         tx_size: usize,
+        timeout: Option<std::time::Duration>,
     ) -> Result<RoundResults, TestrpcError> {
         let mut txs: Vec<String> = Vec::new();
         for _ in 0..num_txs {
@@ -106,6 +107,7 @@ impl Adapter for HotshotAdapter {
             req_id,
             RPC_METHOD,
             serde_json::json!({ "txs": txs }),
+            timeout,
         )
         .await?;
 

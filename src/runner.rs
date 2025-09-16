@@ -41,9 +41,10 @@ pub async fn run(
             let iteration = i;
             let round_num = r;
             let adapter = cfg.adapter.clone();
+            let timeout = cfg.timeout.map(|t| Duration::from_secs(t as u64));
             tokio::select! {
                 _ = task::spawn(async move {
-                    match process_round(adapter, round, iteration, rpc_urls, round_templates).await {
+                    match process_round(adapter, round, iteration, rpc_urls, round_templates, timeout).await {
                         Ok(result) => {
                             tracing::debug!("Iteration {} round {} completed", iteration, round_num);
                             let mut results = results.write().unwrap();
@@ -91,6 +92,7 @@ async fn process_round(
     iteration: u32,
     rpc_urls: Vec<String>,
     round_templates: HashMap<String, config::RoundTemplate>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<RoundResults, TestrpcError> {
     let mut req_id = iteration as u64;
     let mut results = RoundResults { sent: 0, failed: 0 };
@@ -120,6 +122,7 @@ async fn process_round(
                     iteration,
                     template.txs,
                     template.tx_size,
+                    timeout,
                 )
                 .await
         });
@@ -172,6 +175,7 @@ mod tests {
             0,
             rpc_urls,
             round_templates,
+            Some(std::time::Duration::from_secs(5)),
         )
         .await
         .unwrap();
