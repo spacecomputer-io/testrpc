@@ -1,5 +1,5 @@
 use clap::Parser;
-use std::{env, sync::Arc};
+use std::{env, sync::Arc, time::Duration};
 
 use testrpc::{common, config, ctx, logging, runner, signal};
 
@@ -71,6 +71,15 @@ async fn main() -> Result<(), common::TestrpcError> {
         }
         urls
     };
+
+    runner::ping_endpoints(
+        cfg.adapter.clone(),
+        rpc_urls.clone(),
+        cfg.timeout
+            .or(Some(15))
+            .map(|t| Duration::from_secs(t as u64)),
+    )
+    .await?;
 
     if let Some(num_of_nodes) = cfg.num_of_nodes {
         let actual_num_of_nodes = rpc_urls.len();
