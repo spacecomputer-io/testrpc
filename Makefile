@@ -1,5 +1,5 @@
 CONTAINER?=testrpc
-IMAGE?=testrpc
+IMAGE?=spacecomp/testrpc:latest
 
 build:
 	@cargo build --bin testrpc
