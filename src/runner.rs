@@ -1,6 +1,6 @@
 use futures::future::join_all;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{atomic, Arc, RwLock};
 use tokio::task;
 use tokio::time::Duration;
 
@@ -14,10 +14,35 @@ pub async fn load_endpoints(cfg: config::Config) -> Result<Vec<String>, TestrpcE
         return Ok(rpcs);
     }
     let adapter = adapters::new_adapter(cfg.adapter)?;
-    adapter
+    let endpoints = adapter
         .load_endpoints(cfg.args.clone())
         .await
-        .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))
+        .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()))?;
+    // for each endpoint call adapter.ping_endpoint to check if it's reachable
+    let reachable_endpoints = Arc::new(atomic::AtomicUsize::new(0));
+    let mut handles = Vec::new();
+    for endpoint in endpoints.clone() {
+        let adapter = adapter.clone();
+        let endpoint_clone = endpoint.clone();
+        let timeout = cfg.timeout.map(|t| Duration::from_secs(t as u64));
+        let reachable_endpoints = Arc::clone(&reachable_endpoints);
+        let handle = tokio::spawn(async move {
+            let res = adapter.ping_endpoint(&endpoint_clone, timeout).await;
+            tracing::info!("Pinged endpoint {}: {:?}", endpoint_clone, res);
+            if res.is_ok() {
+                reachable_endpoints.fetch_add(1, atomic::Ordering::SeqCst);
+            }
+            res
+        });
+        handles.push(handle);
+    }
+    join_all(handles).await;
+    tracing::info!(
+        "Loaded {} endpoints, {} live",
+        endpoints.len(),
+        reachable_endpoints.load(atomic::Ordering::SeqCst)
+    );
+    Ok(endpoints)
 }
 
 /// Run the test flow with the given configuration.

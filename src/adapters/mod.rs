@@ -14,6 +14,15 @@ pub trait Adapter {
         args: HashMap<String, Value>,
     ) -> impl std::future::Future<Output = Result<Vec<String>, common::TestrpcError>> + Send;
 
+    /// Ping the given RPC URL to check if it's reachable.
+    /// This function should be implemented by each adapter to ping the RPC URL.
+    /// Returns a future that resolves to a boolean indicating if the ping was successful.
+    fn ping_endpoint(
+        &self,
+        rpc_url: &str,
+        timeout: Option<std::time::Duration>,
+    ) -> impl std::future::Future<Output = Result<bool, common::TestrpcError>> + Send;
+
     /// Send transactions to the given RPC URL.
     /// This function should be implemented by each adapter to send transactions to the RPC URL.
     /// Returns a future that resolves to RoundResults.

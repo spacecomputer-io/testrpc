@@ -35,7 +35,7 @@ async fn main() -> Result<(), common::TestrpcError> {
     let ctx = Arc::new(ctx::Context::new());
     let start = std::time::Instant::now();
 
-    tracing::info!("XXX1 Starting testrpc with config file: {}", &opts.file);
+    tracing::info!("Starting testrpc with config file: {}", &opts.file);
 
     if opts.dry_run {
         tracing::info!("Dry run, we will not send any RPCs");
