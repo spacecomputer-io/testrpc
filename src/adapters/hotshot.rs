@@ -87,6 +87,17 @@ impl Adapter for HotshotAdapter {
         Ok(rpc_urls)
     }
 
+    async fn ping_endpoint(
+        &self,
+        rpc_url: &str,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<bool, crate::common::TestrpcError> {
+        let req_id = rand::rng().random::<u64>();
+        let _ = jrpc::send(rpc_url, req_id, RPC_METHOD, serde_json::json!({}), timeout).await?;
+
+        Ok(true)
+    }
+
     async fn send_txs(
         &self,
         rpc_url: &str,
