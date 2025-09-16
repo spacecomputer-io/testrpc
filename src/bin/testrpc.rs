@@ -72,14 +72,25 @@ async fn main() -> Result<(), common::TestrpcError> {
         urls
     };
 
-    runner::ping_endpoints(
+    match runner::ping_endpoints(
         cfg.adapter.clone(),
         rpc_urls.clone(),
         cfg.timeout
             .or(Some(15))
             .map(|t| Duration::from_secs(t as u64)),
     )
-    .await?;
+    .await
+    {
+        Ok(0) => {
+            tracing::warn!("No reachable endpoints found");
+        }
+        Ok(n) => {
+            tracing::info!("{} endpoints are reachable", n);
+        }
+        Err(e) => {
+            tracing::warn!("Failed to ping endpoints: {}", e);
+        }
+    }
 
     if let Some(num_of_nodes) = cfg.num_of_nodes {
         let actual_num_of_nodes = rpc_urls.len();
