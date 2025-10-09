@@ -1,7 +1,6 @@
 use futures::future::join_all;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use tokio::task;
 use tokio::time::Duration;
 
 use crate::common::{RoundResults, TestrpcError};
@@ -49,8 +48,8 @@ pub async fn run(
             let round_num = r;
             let adapter = cfg.adapter.clone();
             tokio::select! {
-                _ = task::spawn(async move {
-                    match process_round(adapter, round, iteration, rpc_urls, round_templates).await {
+                result = process_round(adapter, round, iteration, rpc_urls, round_templates) => {
+                    match result {
                         Ok(result) => {
                             tracing::debug!("Iteration {} round {} completed (sent: {}, failed: {})", 
                                 iteration, round_num, result.sent, result.failed);
@@ -61,7 +60,7 @@ pub async fn run(
                             tracing::warn!("Iteration {} round {} failed: {}", iteration, round_num, e);
                         }
                     }
-                }) => {}
+                }
                 _ = quit.recv() => {
                     tracing::warn!("Context stopped signal received during iteration {} round {} - terminating early", iteration, round_num);
                     break;
