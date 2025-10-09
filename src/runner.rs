@@ -4,7 +4,6 @@ use std::sync::{Arc, RwLock};
 use tokio::task;
 use tokio::time::Duration;
 
-use crate::adapters::Adapter;
 use crate::common::{RoundResults, TestrpcError};
 use crate::config::{self, AdapterConfig};
 use crate::{adapters, ctx};
@@ -31,7 +30,15 @@ pub async fn run(
     let mut i: u32 = 0;
     let mut quit = ctx.recv();
     let results = Arc::new(RwLock::new(Vec::new()));
+    
+    tracing::info!("Runner starting with {} iterations configured, {} rounds per iteration, {} nodes",
+        cfg.iterations.map(|i| i.to_string()).unwrap_or_else(|| "unlimited".to_string()),
+        cfg.rounds.len(),
+        rpc_urls.len()
+    );
+    
     loop {
+        tracing::debug!("Starting main loop iteration {}", i + 1);
         let rounds = cfg.rounds.clone();
         for (r, round) in rounds.into_iter().enumerate() {
             let round_templates = cfg.round_templates.clone();
@@ -45,7 +52,8 @@ pub async fn run(
                 _ = task::spawn(async move {
                     match process_round(adapter, round, iteration, rpc_urls, round_templates).await {
                         Ok(result) => {
-                            tracing::debug!("Iteration {} round {} completed", iteration, round_num);
+                            tracing::debug!("Iteration {} round {} completed (sent: {}, failed: {})", 
+                                iteration, round_num, result.sent, result.failed);
                             let mut results = results.write().unwrap();
                             results.push(result);
                         }
@@ -55,32 +63,37 @@ pub async fn run(
                     }
                 }) => {}
                 _ = quit.recv() => {
-                    tracing::debug!("Iteration {} round {} timed out as ctx was stopped", iteration, round_num);
+                    tracing::warn!("Context stopped signal received during iteration {} round {} - terminating early", iteration, round_num);
                     break;
                 }
             }
             tokio::select! {
                 _ = quit.recv() => {
-                    tracing::debug!("ctx stopped during iteration {} round {}", iteration, round_num);
+                    tracing::warn!("Context stopped signal received during interval sleep (iteration {} round {}) - terminating early", iteration, round_num);
                     break;
                 }
-                _ = tokio::time::sleep(Duration::from_secs(cfg.interval)) => {}
+                _ = tokio::time::sleep(Duration::from_secs(cfg.interval)) => {
+                    tracing::debug!("Completed interval sleep of {} seconds", cfg.interval);
+                }
             }
             if let Some(iterations) = cfg.iterations {
                 if i >= iterations as u32 {
-                    tracing::debug!("Reached max iterations: {}", i);
+                    tracing::info!("Reached configured max iterations: {} (target was {})", i, iterations);
                     break;
                 }
             }
         }
         if let Some(iterations) = cfg.iterations {
             if i >= iterations as u32 {
-                tracing::debug!("Reached max iterations: {}", i);
+                tracing::info!("Exiting main loop: reached configured max iterations {} (target was {})", i, iterations);
                 break;
             }
         }
     }
+    
+    tracing::info!("Runner completed after {} iterations", i);
     let results = Arc::try_unwrap(results).unwrap().into_inner().unwrap();
+    tracing::info!("Collected {} round results", results.len());
     Ok(results)
 }
 

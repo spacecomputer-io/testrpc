@@ -65,19 +65,25 @@ async fn main() -> Result<(), common::TestrpcError> {
     let ctx_cloned = ctx.clone();
     tokio::select! {
         _ = tokio::spawn(async move {
+            tracing::info!("Main runner task started");
             let round_results = runner::run(ctx_cloned, cfg.clone(), rpc_urls)
                 .await
                 .unwrap();
             let time_elapsed = start.elapsed();
+            tracing::info!("Runner completed naturally after {:?}", time_elapsed);
             let results = common::FlowResults::new_from_round_results(round_results, time_elapsed);
             let results_yaml = serde_yaml::to_string(&results).unwrap();
             println!("---RESULTS--\n");
             println!("{results_yaml}");
             println!("---END RESULTS--\n");
-        }) => {}
+        }) => {
+            tracing::info!("Main runner task finished normally");
+        }
         _ = signal::wait_exit_signals() => {
+            tracing::warn!("Exit signal received - stopping context and terminating");
             ctx.stop();
         }
     }
+    tracing::info!("Testrpc shutting down");
     Ok(())
 }

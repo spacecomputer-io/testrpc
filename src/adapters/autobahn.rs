@@ -67,7 +67,7 @@ impl Adapter for AutobahnAdapter {
     fn send_txs(
         &self,
         tcp_endpoint: &str,
-        req_id: u64,
+        _req_id: u64,
         _iteration: u32,
         num_txs: usize,
         tx_size: usize,
@@ -91,9 +91,12 @@ impl Adapter for AutobahnAdapter {
             }
 
             // Connect to the Autobahn node via TCP
+            let connect_start = Instant::now();
             let stream = TcpStream::connect(&tcp_endpoint)
                 .await
                 .map_err(|e| TestrpcError::RpcError(format!("Failed to connect to {}: {}", tcp_endpoint, e)))?;
+            let connect_duration = connect_start.elapsed();
+            tracing::debug!("TCP connection to {} established in {:?}", tcp_endpoint, connect_duration);
 
             let mut transport = Framed::new(stream, LengthDelimitedCodec::new());
             let mut successful_txs = 0;
@@ -117,6 +120,7 @@ impl Adapter for AutobahnAdapter {
 
             // NOTE: This log entry is used to compute performance
             tracing::info!("Start sending transactions to {}", tcp_endpoint);
+            let send_start = Instant::now();
 
             'main: loop {
                 interval_timer.tick().await;
@@ -188,8 +192,15 @@ impl Adapter for AutobahnAdapter {
                 }
             }
 
-            tracing::info!("Completed sending {} transactions to {} (success: {}, failed: {})", 
-                num_txs, tcp_endpoint, successful_txs, failed_txs);
+            let send_duration = send_start.elapsed();
+            let throughput = if send_duration.as_secs_f64() > 0.0 {
+                successful_txs as f64 / send_duration.as_secs_f64()
+            } else {
+                0.0
+            };
+            
+            tracing::info!("Completed sending {} transactions to {} (success: {}, failed: {}) in {:?} ({:.0} tx/s)", 
+                num_txs, tcp_endpoint, successful_txs, failed_txs, send_duration, throughput);
 
             Ok(RoundResults {
                 sent: successful_txs,

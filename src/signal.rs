@@ -1,9 +1,10 @@
 use tokio::{select, signal};
-use tracing::debug;
 
 use crate::common::TestrpcError;
 
 pub async fn wait_exit_signals() -> Result<(), TestrpcError> {
+    tracing::debug!("Signal handler initialized, waiting for termination signals...");
+    
     let mut terminate = signal::unix::signal(signal::unix::SignalKind::terminate())
         .map_err(|e| TestrpcError::TerminationError(e.to_string()))?;
     let mut interrupt = signal::unix::signal(signal::unix::SignalKind::interrupt())
@@ -13,13 +14,13 @@ pub async fn wait_exit_signals() -> Result<(), TestrpcError> {
 
     select! {
         _ = terminate.recv() => {
-            debug!("Received terminate signal");
+            tracing::warn!("🛑 SIGTERM received - shutting down gracefully");
         }
         _ = interrupt.recv() => {
-            debug!("Received interrupt signal");
+            tracing::warn!("🛑 SIGINT (Ctrl+C) received - shutting down gracefully");
         }
         _ = quit.recv() => {
-            debug!("Received quit signal");
+            tracing::warn!("🛑 SIGQUIT received - shutting down gracefully");
         }
     }
 
