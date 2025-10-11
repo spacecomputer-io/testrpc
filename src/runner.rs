@@ -51,8 +51,7 @@ pub async fn run(
                 result = process_round(adapter, round, iteration, rpc_urls, round_templates) => {
                     match result {
                         Ok(result) => {
-                            tracing::debug!("Iteration {} round {} completed (sent: {}, failed: {})", 
-                                iteration, round_num, result.sent, result.failed);
+                            // Detailed logging is now in process_round
                             let mut results = results.write().unwrap();
                             results.push(result);
                         }
@@ -109,7 +108,11 @@ async fn process_round(
     let mut handles = Vec::new();
 
     let adapter = adapters::new_adapter(cfg)?;
+    
+    let round_start = std::time::Instant::now();
 
+    let mut node_timings = Vec::new();
+    
     for rpc in &round.rpcs {
         if rpc_urls.len() <= *rpc {
             return Err(TestrpcError::LoadEndpointsError(format!(
@@ -124,8 +127,11 @@ async fn process_round(
         )?;
 
         let adapter = adapter.clone();
+        let node_url = rpc_url.clone();
+        let node_start = std::time::Instant::now();
+        
         let handle = tokio::spawn(async move {
-            adapter
+            let result = adapter
                 .send_txs(
                     &rpc_url,
                     req_id_clone,
@@ -133,7 +139,8 @@ async fn process_round(
                     template.txs,
                     template.tx_size,
                 )
-                .await
+                .await;
+            (node_url, node_start.elapsed(), result)
         });
 
         handles.push(handle);
@@ -141,17 +148,47 @@ async fn process_round(
     }
 
     let results_vec = join_all(handles).await;
+    
+    // Track node timings for slowest node identification
+    let mut slowest_node = String::new();
+    let mut slowest_time = Duration::from_secs(0);
 
     for result in results_vec {
         match result {
-            Ok(Ok(round_results)) => {
+            Ok((node_url, duration, Ok(round_results))) => {
                 results.sent += round_results.sent;
                 results.failed += round_results.failed;
+                
+                // Track timing for this node
+                node_timings.push((node_url.clone(), duration));
+                
+                // Update slowest node
+                if duration > slowest_time {
+                    slowest_time = duration;
+                    slowest_node = node_url;
+                }
             }
-            Ok(Err(e)) => return Err(e),
+            Ok((_, _, Err(e))) => return Err(e),
             Err(e) => return Err(TestrpcError::ExecutionError(e.to_string())),
         }
     }
+    
+    let round_duration = round_start.elapsed();
+    
+    // Log performance summary with slowest node highlighted
+    tracing::info!(
+        "Iteration {} completed in {:?} (slowest node: {} took {:?})", 
+        iteration, 
+        round_duration,
+        slowest_node,
+        slowest_time
+    );
+    
+    // Detailed per-node timing at debug level
+    for (node, duration) in node_timings {
+        tracing::debug!("  Node {} took {:?}", node, duration);
+    }
+    
     Ok(results)
 }
 

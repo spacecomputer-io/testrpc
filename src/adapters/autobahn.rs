@@ -108,18 +108,12 @@ impl Adapter for AutobahnAdapter {
             
             let burst_size = num_txs / PRECISION as usize; // Transactions per burst
             let remaining_txs = num_txs % PRECISION as usize; // Handle remainder
-            
-            tracing::info!("Starting burst sending to {}: {} total txs, {} per burst, {}ms intervals", 
-                tcp_endpoint, num_txs, burst_size, BURST_DURATION);
 
             // Setup burst timing
             let mut interval_timer = interval(Duration::from_millis(BURST_DURATION));
             let mut counter = 0u64;
             let mut r: u64 = rand::rng().random(); // Random seed for unique transaction IDs
             let mut tx_index = 0;
-
-            // NOTE: This log entry is used to compute performance
-            tracing::info!("Start sending transactions to {}", tcp_endpoint);
             let send_start = Instant::now();
 
             'main: loop {
@@ -145,9 +139,6 @@ impl Adapter for AutobahnAdapter {
                     // Autobahn transaction format following original logic:
                     let (tx_type, tx_id) = if burst_size > 0 && x as u64 == counter % burst_size as u64 {
                         // Sample transaction (one per burst cycle)
-                        // NOTE: This log entry is used to compute performance
-                        tracing::info!("Sending sample transaction {} to {}", counter, tcp_endpoint);
-                        
                         tx.put_u8(0u8); // Sample txs start with 0
                         tx.put_u64(counter); // This counter identifies the tx
                         (0u8, counter)
@@ -170,9 +161,10 @@ impl Adapter for AutobahnAdapter {
                         break 'main;
                     } else {
                         successful_txs += 1;
-                        let tx_type_str = if tx_type == 0 { "SAMPLE" } else { "STANDARD" };
-                        tracing::debug!("Successfully sent {} transaction #{} (ID={}) to {}", 
-                            tx_type_str, tx_index + 1, tx_id, tcp_endpoint);
+                        // Only log sample transactions to reduce verbosity
+                        if tx_type == 0 {
+                            tracing::debug!("Sent sample transaction #{} (ID={}) to {}", tx_index + 1, tx_id, tcp_endpoint);
+                        }
                     }
                     
                     tx_index += 1;
