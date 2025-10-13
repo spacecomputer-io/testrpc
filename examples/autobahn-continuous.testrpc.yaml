@@ -1,0 +1,60 @@
+# Autobahn Continuous Streaming Mode Configuration
+# This configuration uses the NEW continuous streaming approach with persistent connections
+# instead of the legacy batch-and-wait pattern.
+
+# Test duration in seconds (NEW)
+duration_seconds: 300 # Run for 5 minutes
+
+# Target transactions per second per node (NEW)
+target_tx_per_second: 30000 # 30K tx/s per node
+
+# Legacy parameters (ignored in continuous mode, but kept for backward compatibility)
+interval: 0 # Not used in continuous mode
+iterations: 0 # Not used in continuous mode
+
+# Adapter configuration
+adapter: autobahn
+args:
+  nodes_config_file: "examples/autobahn-authorities.json"
+
+# Round templates define transaction characteristics
+round_templates:
+  continuous:
+    txs: 0 # Not used in continuous mode (calculated from duration * target_tx_per_second)
+    tx_size: 512 # Transaction size in bytes
+
+# Rounds configuration (only used for template reference in continuous mode)
+rounds:
+  - rpcs: [0, 1, 2, 3, 4, 5, 6, 7] # All 8 nodes
+    use_template: continuous
+# Behavioral Characteristics:
+# ============================
+#
+# CONNECTIONS:
+#   - Establishes 8 persistent TCP connections at startup
+#   - Reuses connections throughout test duration
+#   - Closes connections only at shutdown
+#   - No per-iteration connection overhead
+#
+# SENDING PATTERN:
+#   - Each node sends continuously at 30,000 tx/s (independent)
+#   - Uses 50ms burst intervals (20 bursts per second)
+#   - Each burst sends 1,500 transactions
+#   - Smooth, continuous load (not bursty)
+#
+# INDEPENDENCE:
+#   - Each node progresses independently
+#   - Fast nodes don't wait for slow nodes
+#   - Failures on one node don't affect others
+#
+# METRICS:
+#   - Per-node throughput reported every 1 second
+#   - Real-time identification of slow nodes
+#   - Continuous tracking of sent/failed counts
+#   - Aggregate system throughput
+#
+# Expected Performance:
+#   - 8 nodes × 30,000 tx/s = 240,000 tx/s aggregate
+#   - ~1.47M total transactions over 5 minutes (per node)
+#   - ~11.7M total transactions across all nodes
+

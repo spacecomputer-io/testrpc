@@ -42,10 +42,14 @@ impl Display for AdapterConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
-    /// Interval between rounds in milliseconds
+    /// Interval between rounds in milliseconds (deprecated for continuous mode)
     pub interval: u64,
-    /// Number of iterations to run, will run indefinitely if None
+    /// Number of iterations to run, will run indefinitely if None (deprecated for continuous mode)
     pub iterations: Option<usize>,
+    /// Test duration in seconds (for continuous streaming mode)
+    pub duration_seconds: Option<u64>,
+    /// Target transactions per second per node (for continuous streaming mode)
+    pub target_tx_per_second: Option<u64>,
     /// Number of expected nodes
     pub num_of_nodes: Option<usize>,
     /// Protocol adapter to use (hotshot)
