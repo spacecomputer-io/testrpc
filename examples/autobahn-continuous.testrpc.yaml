@@ -38,9 +38,9 @@ rounds:
 #
 # SENDING PATTERN:
 #   - Each node sends continuously at 30,000 tx/s (independent)
-#   - Uses 50ms burst intervals (20 bursts per second)
-#   - Each burst sends 1,500 transactions
-#   - Smooth, continuous load (not bursty)
+#   - Smooth sending: 1 transaction every 33 microseconds
+#   - No bursting - steady stream prevents batch accumulation
+#   - Workers seal batches predictably at ~50-75ms intervals
 #
 # INDEPENDENCE:
 #   - Each node progresses independently

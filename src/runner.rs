@@ -226,17 +226,18 @@ async fn continuous_sender_task(
     use futures::sink::SinkExt;
     use rand::Rng;
     
-    const PRECISION: u64 = 20; // 20 bursts per second (50ms intervals)
-    let burst_interval = Duration::from_millis(1000 / PRECISION);
-    let burst_size = (target_tx_per_second / PRECISION) as usize;
+    // Smooth sending: send 1 tx every (1_000_000 / target_tx_per_second) microseconds
+    let interval_us = 1_000_000 / target_tx_per_second;
+    let send_interval = Duration::from_micros(interval_us);
     
-    tracing::debug!("Node {} sender starting: {} tx/s ({} tx per {}ms burst)", 
-        node_idx, target_tx_per_second, burst_size, burst_interval.as_millis());
+    tracing::debug!("Node {} sender starting: {} tx/s (smooth sending, 1 tx every {}µs)", 
+        node_idx, target_tx_per_second, interval_us);
     
-    let mut interval_timer = interval(burst_interval);
+    let mut interval_timer = interval(send_interval);
     interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     
     let mut r: u64 = rand::rng().random();
+    let mut tx_count: u64 = 0;
     
     loop {
         // Check if we should stop
@@ -247,46 +248,35 @@ async fn continuous_sender_task(
         
         tokio::select! {
             _ = interval_timer.tick() => {
-                let burst_start = Instant::now();
+                let mut tx = BytesMut::with_capacity(tx_size);
                 
-                // Send burst of transactions
-                for _ in 0..burst_size {
-                    let mut tx = BytesMut::with_capacity(tx_size);
-                    
-                    // Autobahn transaction format
-                    r += 1;
-                    tx.put_u8(1u8); // Standard transaction
-                    tx.put_u64(r);
-                    tx.resize(tx_size, 0u8);
-                    
-                    let bytes = tx.split().freeze();
-                    
-                    // Send transaction
-                    match transport.send(bytes).await {
-                        Ok(_) => {
-                            let mut stats_guard = stats.lock().unwrap();
-                            if let Some(node_stats) = stats_guard.get_mut(&node_idx) {
-                                node_stats.sent += 1;
-                                node_stats.bytes_sent += tx_size as u64;
-                            }
+                // Autobahn transaction format
+                r += 1;
+                tx.put_u8(1u8); // Standard transaction
+                tx.put_u64(r);
+                tx.resize(tx_size, 0u8);
+                
+                let bytes = tx.split().freeze();
+                
+                // Send transaction
+                match transport.send(bytes).await {
+                    Ok(_) => {
+                        let mut stats_guard = stats.lock().unwrap();
+                        if let Some(node_stats) = stats_guard.get_mut(&node_idx) {
+                            node_stats.sent += 1;
+                            node_stats.bytes_sent += tx_size as u64;
                         }
-                        Err(e) => {
-                            tracing::warn!("Node {} send error: {}", node_idx, e);
-                            let mut stats_guard = stats.lock().unwrap();
-                            if let Some(node_stats) = stats_guard.get_mut(&node_idx) {
-                                node_stats.failed += 1;
-                            }
-                            // Continue sending to other nodes even if this one fails
-                            break;
-                        }
+                        tx_count += 1;
                     }
-                }
-                
-                // Warn if burst took longer than expected
-                let burst_duration = burst_start.elapsed();
-                if burst_duration > burst_interval {
-                    tracing::warn!("Node {} burst took {:?}, exceeds target of {:?}", 
-                        node_idx, burst_duration, burst_interval);
+                    Err(e) => {
+                        tracing::warn!("Node {} send error: {}", node_idx, e);
+                        let mut stats_guard = stats.lock().unwrap();
+                        if let Some(node_stats) = stats_guard.get_mut(&node_idx) {
+                            node_stats.failed += 1;
+                        }
+                        // Stop sending on connection error
+                        break;
+                    }
                 }
             }
             _ = quit_rx.recv() => {
@@ -296,7 +286,7 @@ async fn continuous_sender_task(
         }
     }
     
-    tracing::debug!("Node {} sender task completed", node_idx);
+    tracing::debug!("Node {} sender task completed ({} transactions sent)", node_idx, tx_count);
 }
 
 /// Metrics reporter task - reports stats every 1 second

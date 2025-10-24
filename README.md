@@ -11,7 +11,9 @@ Testrpc is a tool that allows you to define a test flow in a declarative way. Th
 Testrpc is designed to be protocol agnostic. It uses protocol adapters to interact with the nodes. The adapter is responsible for discovering the rpcs, sending transactions, and collecting metrics.
 
 The following adapters are available:
+
 - [x] Hotshot
+- [x] Autobahn (supports both legacy batch mode and new continuous streaming mode)
 - [ ] Libp2p
 
 Each adapter should implement the following functions:
@@ -19,8 +21,36 @@ Each adapter should implement the following functions:
 - `load_endpoints`: Load the RPC endpoints to be used during the flow.
 - `process_round`: Process a round of the flow, expected to send transactions to the RPC servers concurrently in each round
 
-
 ### Config File
+
+#### Autobahn Continuous Mode (NEW)
+
+For high-throughput continuous streaming with persistent connections:
+
+```yaml
+duration_seconds: 300 # Test duration in seconds
+target_tx_per_second: 30000 # Target tx/s per node
+adapter: autobahn
+args:
+  nodes_config_file: ".committee.json"
+round_templates:
+  continuous:
+    tx_size: 512 # Transaction size in bytes
+rounds:
+  - rpcs: [0, 1, 2, 3, 4, 5, 6, 7]
+    use_template: continuous
+```
+
+**Features:**
+
+- ✅ Persistent connections (no per-iteration reconnection overhead)
+- ✅ Independent per-node sending (fast nodes don't wait for slow ones)
+- ✅ Smooth steady-stream sending (no bursting, prevents batch accumulation)
+- ✅ Real-time per-node metrics (identify bottlenecks)
+
+See `QUICK_START_CONTINUOUS_MODE.md` for full documentation.
+
+#### Hotshot Testing
 
 See the following yaml defines a flow for hotshot testing:
 
@@ -41,18 +71,17 @@ round_templates: # reusable round templates
     txs: 10 # number of transactions to send
     tx_size: 100 # size of each transaction
 rounds: # rounds to run continuously, each round will be an iteration
-  - rpcs: [1,2] # rpcs to use out of the available ones
+  - rpcs: [1, 2] # rpcs to use out of the available ones
     use_template: 10_txs # use a round template
-  - rpcs: [3,0]
+  - rpcs: [3, 0]
     use_template: 10_txs
-  - rpcs: [1,0]
+  - rpcs: [1, 0]
     template: # define a round template inline
-        txs: 2
-        tx_size: 200
+      txs: 2
+      tx_size: 200
 ```
 
 ## Usage
-
 
 ### Install on OS
 
