@@ -91,6 +91,12 @@ async fn run_continuous_mode(
     for (idx, url) in rpc_urls.iter().enumerate() {
         match TcpStream::connect(url).await {
             Ok(stream) => {
+                // Enable TCP_NODELAY to disable Nagle's algorithm for low-latency
+                // This is critical when sending from a remote load generator
+                if let Err(e) = stream.set_nodelay(true) {
+                    tracing::warn!("Failed to set TCP_NODELAY for connection to node {}: {}", idx, e);
+                }
+                
                 let framed = Framed::new(stream, LengthDelimitedCodec::new());
                 connections.push((idx, url.clone(), framed));
                 tracing::debug!("Connected to node {} ({})", idx, url);

@@ -95,6 +95,12 @@ impl Adapter for AutobahnAdapter {
             let stream = TcpStream::connect(&tcp_endpoint)
                 .await
                 .map_err(|e| TestrpcError::RpcError(format!("Failed to connect to {}: {}", tcp_endpoint, e)))?;
+            
+            // Enable TCP_NODELAY to disable Nagle's algorithm for low-latency
+            if let Err(e) = stream.set_nodelay(true) {
+                tracing::warn!("Failed to set TCP_NODELAY for connection to {}: {}", tcp_endpoint, e);
+            }
+            
             let connect_duration = connect_start.elapsed();
             tracing::debug!("TCP connection to {} established in {:?}", tcp_endpoint, connect_duration);
 
