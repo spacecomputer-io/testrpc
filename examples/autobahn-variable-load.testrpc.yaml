@@ -1,0 +1,91 @@
+# Autobahn Variable Load Configuration
+# This configuration demonstrates the NEW variable load feature which allows
+# different transaction rates over different time intervals (ramp-up/down testing)
+
+# Variable load stages (NEW) - replaces single duration_seconds + target_tx_per_second
+load_stages:
+  # Stage 1: Warm-up - 60 seconds at 10K tx/s per node
+  - duration_seconds: 60
+    target_tx_per_second: 10000
+
+  # Stage 2: Ramp up - 60 seconds at 15K tx/s per node
+  - duration_seconds: 60
+    target_tx_per_second: 15000
+
+  # Stage 3: Peak load - 60 seconds at 20K tx/s per node
+  - duration_seconds: 60
+    target_tx_per_second: 20000
+
+  # Stage 4: Stress test - 60 seconds at 25K tx/s per node
+  - duration_seconds: 60
+    target_tx_per_second: 25000
+
+  # Stage 5: Ramp down - 60 seconds at 15K tx/s per node
+  - duration_seconds: 60
+    target_tx_per_second: 15000
+
+# Legacy parameters (not used with load_stages, but kept for compatibility)
+interval: 0
+iterations: 0
+duration_seconds: 0
+target_tx_per_second: 0
+
+# Adapter configuration
+adapter: autobahn
+args:
+  nodes_config_file: "examples/autobahn-authorities.json"
+
+# Round templates define transaction characteristics
+round_templates:
+  variable_load:
+    txs: 0 # Not used in continuous mode (calculated from stages)
+    tx_size: 512 # Transaction size in bytes
+
+# Rounds configuration (only used for template reference in continuous mode)
+rounds:
+  - rpcs: [0, 1, 2, 3, 4, 5, 6, 7] # All 8 nodes
+    use_template: variable_load
+# Behavioral Characteristics:
+# ============================
+#
+# LOAD STAGES:
+#   - System automatically transitions through stages
+#   - Each stage has its own duration and target rate
+#   - Transitions are smooth - sending rate adjusts dynamically
+#   - No reconnections between stages
+#
+# CONNECTIONS:
+#   - Establishes 8 persistent TCP connections at startup
+#   - Reuses connections throughout all stages
+#   - Closes connections only at shutdown
+#   - No per-stage connection overhead
+#
+# SENDING PATTERN:
+#   - Each node sends continuously at the current stage's target rate
+#   - Rate adjusts automatically when stage transitions occur
+#   - Smooth sending within each stage (no bursting)
+#   - Independent per-node operation
+#
+# METRICS:
+#   - Per-node throughput reported every 1 second
+#   - Shows current stage number and target rate
+#   - Displays time remaining in current stage
+#   - Shows % of target achieved per node
+#   - Stage transitions are prominently logged
+#
+# USE CASES:
+#   - Ramp-up testing: gradually increase load to find limits
+#   - Ramp-down testing: verify system recovery
+#   - Step testing: discrete load levels to measure response
+#   - Stress testing: push to peak load then back down
+#
+# Expected Performance (with 8 nodes):
+#   - Stage 1: 8 × 10,000 = 80,000 tx/s aggregate
+#   - Stage 2: 8 × 15,000 = 120,000 tx/s aggregate
+#   - Stage 3: 8 × 20,000 = 160,000 tx/s aggregate
+#   - Stage 4: 8 × 25,000 = 200,000 tx/s aggregate
+#   - Stage 5: 8 × 15,000 = 120,000 tx/s aggregate
+#   - Total test duration: 5 minutes (300 seconds)
+#   - Total transactions per node: ~90,000
+#   - Total transactions aggregate: ~720,000
+

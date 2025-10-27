@@ -1,0 +1,39 @@
+# Autobahn Simple Ramp-Up Configuration
+# Simple example: increase load every minute (10k → 15k → 20k)
+
+# Variable load stages - one per minute with increasing rate
+load_stages:
+  - duration_seconds: 60 # First minute: 10K tx/s per node
+    target_tx_per_second: 10000
+
+  - duration_seconds: 60 # Second minute: 15K tx/s per node
+    target_tx_per_second: 15000
+
+  - duration_seconds: 60 # Third minute: 20K tx/s per node
+    target_tx_per_second: 20000
+
+# Legacy parameters (ignored when using load_stages)
+interval: 0
+iterations: 0
+
+# Adapter configuration
+adapter: autobahn
+args:
+  nodes_config_file: "examples/autobahn-authorities.json"
+
+# Transaction template
+round_templates:
+  ramp_test:
+    txs: 0 # Not used in continuous mode
+    tx_size: 512 # 512 bytes per transaction
+
+# Rounds configuration
+rounds:
+  - rpcs: [0, 1, 2, 3, 4, 5, 6, 7] # All 8 nodes
+    use_template: ramp_test
+# Expected Results (with 8 nodes):
+#   Minute 1: 80K tx/s aggregate  (8 nodes × 10K)
+#   Minute 2: 120K tx/s aggregate (8 nodes × 15K)
+#   Minute 3: 160K tx/s aggregate (8 nodes × 20K)
+#   Total: 3 minutes, ~1.08M total transactions
+

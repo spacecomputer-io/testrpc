@@ -6,8 +6,17 @@ use tokio::net::TcpStream;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use crate::common::{RoundResults, TestrpcError};
-use crate::config::{self, AdapterConfig};
+use crate::config::{self, AdapterConfig, LoadStage};
 use crate::{adapters, ctx};
+
+/// Shared state for current load stage
+#[derive(Debug, Clone)]
+pub struct LoadStageInfo {
+    pub stage_index: usize,
+    pub target_tx_per_second: u64,
+    pub stage_start: Instant,
+    pub stage_duration: Duration,
+}
 
 /// Per-node statistics for continuous streaming
 #[derive(Debug, Clone, Default)]
@@ -38,7 +47,9 @@ pub async fn run(
     rpc_urls: Vec<String>,
 ) -> Result<Vec<RoundResults>, TestrpcError> {
     // Check if we should use continuous streaming mode or legacy batch mode
-    let use_continuous_mode = cfg.duration_seconds.is_some() && cfg.target_tx_per_second.is_some();
+    // Continuous mode is enabled by either load_stages OR (duration_seconds AND target_tx_per_second)
+    let use_continuous_mode = cfg.load_stages.is_some() 
+        || (cfg.duration_seconds.is_some() && cfg.target_tx_per_second.is_some());
     
     if use_continuous_mode {
         run_continuous_mode(ctx, cfg, rpc_urls).await
@@ -53,14 +64,48 @@ async fn run_continuous_mode(
     cfg: config::Config,
     rpc_urls: Vec<String>,
 ) -> Result<Vec<RoundResults>, TestrpcError> {
-    let duration_seconds = cfg.duration_seconds.unwrap();
-    let target_tx_per_second = cfg.target_tx_per_second.unwrap();
+    // Check if using load stages (variable rate) or single rate
+    let load_stages = if let Some(stages) = cfg.load_stages.clone() {
+        if stages.is_empty() {
+            return Err(TestrpcError::LoadConfigError(
+                "load_stages cannot be empty".to_string(),
+                "".to_string(),
+            ));
+        }
+        stages
+    } else if let (Some(duration), Some(target_rate)) = (cfg.duration_seconds, cfg.target_tx_per_second) {
+        // Convert single rate config to a single-stage format for unified handling
+        vec![LoadStage {
+            duration_seconds: duration,
+            target_tx_per_second: target_rate,
+        }]
+    } else {
+        return Err(TestrpcError::LoadConfigError(
+            "Continuous mode requires either 'load_stages' or both 'duration_seconds' and 'target_tx_per_second'".to_string(),
+            "".to_string(),
+        ));
+    };
     
-    tracing::info!("Runner starting in CONTINUOUS MODE:");
-    tracing::info!("  Duration: {} seconds", duration_seconds);
-    tracing::info!("  Target: {} tx/s per node", target_tx_per_second);
+    let total_duration: u64 = load_stages.iter().map(|s| s.duration_seconds).sum();
+    let is_variable_load = load_stages.len() > 1;
+    
+    tracing::info!("Runner starting in CONTINUOUS MODE{}:", if is_variable_load { " (VARIABLE LOAD)" } else { "" });
+    tracing::info!("  Total duration: {} seconds", total_duration);
     tracing::info!("  Nodes: {}", rpc_urls.len());
-    tracing::info!("  Total target throughput: {} tx/s", target_tx_per_second * rpc_urls.len() as u64);
+    
+    if is_variable_load {
+        tracing::info!("  Load stages:");
+        for (i, stage) in load_stages.iter().enumerate() {
+            tracing::info!("    Stage {}: {} tx/s per node for {} seconds (aggregate: {} tx/s)", 
+                i + 1, 
+                stage.target_tx_per_second, 
+                stage.duration_seconds,
+                stage.target_tx_per_second * rpc_urls.len() as u64);
+        }
+    } else {
+        tracing::info!("  Target: {} tx/s per node", load_stages[0].target_tx_per_second);
+        tracing::info!("  Total target throughput: {} tx/s", load_stages[0].target_tx_per_second * rpc_urls.len() as u64);
+    }
     
     // Get transaction template
     let template = cfg.rounds.first()
@@ -73,13 +118,25 @@ async fn run_continuous_mode(
     let is_dry_run = std::env::var("DRY_RUN").is_ok();
     if is_dry_run {
         tracing::info!("DRY_RUN mode: Would establish persistent connections to {} nodes", rpc_urls.len());
-        tracing::info!("DRY_RUN mode: Would send {} tx/s per node for {} seconds", target_tx_per_second, duration_seconds);
+        if is_variable_load {
+            tracing::info!("DRY_RUN mode: Would execute {} load stages over {} seconds", load_stages.len(), total_duration);
+            for (i, stage) in load_stages.iter().enumerate() {
+                tracing::info!("DRY_RUN mode:   Stage {}: {} tx/s per node for {} seconds", 
+                    i + 1, stage.target_tx_per_second, stage.duration_seconds);
+            }
+        } else {
+            tracing::info!("DRY_RUN mode: Would send {} tx/s per node for {} seconds", 
+                load_stages[0].target_tx_per_second, total_duration);
+        }
+        
+        let total_tx: u64 = load_stages.iter()
+            .map(|s| s.target_tx_per_second * s.duration_seconds)
+            .sum();
         tracing::info!("DRY_RUN mode: Total expected transactions: {} per node, {} aggregate",
-            target_tx_per_second * duration_seconds,
-            target_tx_per_second * duration_seconds * rpc_urls.len() as u64);
+            total_tx, total_tx * rpc_urls.len() as u64);
         
         return Ok(vec![RoundResults {
-            sent: (target_tx_per_second * duration_seconds * rpc_urls.len() as u64) as usize,
+            sent: (total_tx * rpc_urls.len() as u64) as usize,
             failed: 0,
         }]);
     }
@@ -116,13 +173,22 @@ async fn run_continuous_mode(
         stats.lock().unwrap().insert(*idx, NodeStats::default());
     }
     
+    // Shared current load stage information
+    let test_start = Instant::now();
+    let current_stage = Arc::new(Mutex::new(LoadStageInfo {
+        stage_index: 0,
+        target_tx_per_second: load_stages[0].target_tx_per_second,
+        stage_start: test_start,
+        stage_duration: Duration::from_secs(load_stages[0].duration_seconds),
+    }));
+    
     // Spawn sender tasks for each node
     let mut sender_handles = Vec::new();
-    let test_start = Instant::now();
-    let test_duration = Duration::from_secs(duration_seconds);
+    let test_duration = Duration::from_secs(total_duration);
     
     for (node_idx, node_url, transport) in connections {
         let stats_clone = Arc::clone(&stats);
+        let current_stage_clone = Arc::clone(&current_stage);
         let ctx_clone = Arc::clone(&ctx);
         let quit_rx = ctx_clone.recv();
         
@@ -131,9 +197,9 @@ async fn run_continuous_mode(
                 node_idx,
                 node_url,
                 transport,
-                target_tx_per_second,
                 tx_size,
                 stats_clone,
+                current_stage_clone,
                 test_duration,
                 test_start,
                 quit_rx,
@@ -143,19 +209,39 @@ async fn run_continuous_mode(
         sender_handles.push(handle);
     }
     
+    // Spawn stage manager task (for variable load)
+    let stage_manager_handle = if is_variable_load {
+        let current_stage_clone = Arc::clone(&current_stage);
+        let ctx_clone = Arc::clone(&ctx);
+        let quit_rx = ctx_clone.recv();
+        let load_stages_clone = load_stages.clone();
+        
+        Some(tokio::spawn(async move {
+            stage_manager_task(
+                current_stage_clone,
+                load_stages_clone,
+                test_start,
+                quit_rx,
+            ).await
+        }))
+    } else {
+        None
+    };
+    
     // Spawn metrics reporter task
     let stats_clone = Arc::clone(&stats);
+    let current_stage_clone = Arc::clone(&current_stage);
     let ctx_clone = Arc::clone(&ctx);
     let quit_rx = ctx_clone.recv();
     let metrics_handle = tokio::spawn(async move {
-        metrics_reporter_task(stats_clone, test_start, quit_rx).await
+        metrics_reporter_task(stats_clone, current_stage_clone, test_start, quit_rx).await
     });
     
     // Wait for test duration or interrupt signal
     let mut quit_rx = ctx.recv();
     tokio::select! {
         _ = tokio::time::sleep(test_duration) => {
-            tracing::info!("Test duration of {} seconds reached", duration_seconds);
+            tracing::info!("Test duration of {} seconds reached", total_duration);
         }
         _ = quit_rx.recv() => {
             tracing::warn!("Received interrupt signal, shutting down...");
@@ -166,8 +252,11 @@ async fn run_continuous_mode(
     tracing::info!("Waiting for sender tasks to complete...");
     let sender_results = join_all(sender_handles).await;
     
-    // Stop metrics reporter
+    // Stop stage manager and metrics reporter
     ctx.stop();
+    if let Some(handle) = stage_manager_handle {
+        let _ = handle.await;
+    }
     let _ = metrics_handle.await;
     
     // Aggregate final statistics
@@ -216,14 +305,14 @@ async fn run_continuous_mode(
     }])
 }
 
-/// Continuous sender task for a single node
+/// Continuous sender task for a single node with dynamic rate adjustment
 async fn continuous_sender_task(
     node_idx: usize,
     _node_url: String,
     mut transport: Framed<TcpStream, LengthDelimitedCodec>,
-    target_tx_per_second: u64,
     tx_size: usize,
     stats: Arc<Mutex<HashMap<usize, NodeStats>>>,
+    current_stage: Arc<Mutex<LoadStageInfo>>,
     test_duration: Duration,
     test_start: Instant,
     mut quit_rx: tokio::sync::broadcast::Receiver<()>,
@@ -232,24 +321,49 @@ async fn continuous_sender_task(
     use futures::sink::SinkExt;
     use rand::Rng;
     
-    // Smooth sending: send 1 tx every (1_000_000 / target_tx_per_second) microseconds
-    let interval_us = 1_000_000 / target_tx_per_second;
-    let send_interval = Duration::from_micros(interval_us);
+    // Get initial rate
+    let initial_rate = current_stage.lock().unwrap().target_tx_per_second;
+    let mut current_rate = initial_rate;
+    let mut interval_us = 1_000_000 / current_rate;
+    let mut send_interval = Duration::from_micros(interval_us);
     
     tracing::debug!("Node {} sender starting: {} tx/s (smooth sending, 1 tx every {}µs)", 
-        node_idx, target_tx_per_second, interval_us);
+        node_idx, current_rate, interval_us);
     
     let mut interval_timer = interval(send_interval);
     interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     
     let mut r: u64 = rand::rng().random();
     let mut tx_count: u64 = 0;
+    let mut last_stage_check = Instant::now();
     
     loop {
         // Check if we should stop
         if test_start.elapsed() >= test_duration {
             tracing::debug!("Node {} sender: test duration reached, stopping", node_idx);
             break;
+        }
+        
+        // Periodically check if the stage has changed (every 100ms)
+        if last_stage_check.elapsed() >= Duration::from_millis(100) {
+            let stage_info = current_stage.lock().unwrap();
+            let new_rate = stage_info.target_tx_per_second;
+            drop(stage_info);
+            
+            if new_rate != current_rate {
+                current_rate = new_rate;
+                interval_us = 1_000_000 / current_rate;
+                send_interval = Duration::from_micros(interval_us);
+                
+                // Create new interval timer with updated rate
+                interval_timer = interval(send_interval);
+                interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                
+                tracing::debug!("Node {} sender: rate changed to {} tx/s (1 tx every {}µs)", 
+                    node_idx, current_rate, interval_us);
+            }
+            
+            last_stage_check = Instant::now();
         }
         
         tokio::select! {
@@ -295,9 +409,66 @@ async fn continuous_sender_task(
     tracing::debug!("Node {} sender task completed ({} transactions sent)", node_idx, tx_count);
 }
 
+/// Stage manager task - manages transitions between load stages
+async fn stage_manager_task(
+    current_stage: Arc<Mutex<LoadStageInfo>>,
+    load_stages: Vec<LoadStage>,
+    _test_start: Instant,
+    mut quit_rx: tokio::sync::broadcast::Receiver<()>,
+) {
+    let mut check_interval = interval(Duration::from_millis(100));
+    check_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    
+    tracing::debug!("Stage manager started with {} stages", load_stages.len());
+    
+    loop {
+        tokio::select! {
+            _ = check_interval.tick() => {
+                let mut stage_info = current_stage.lock().unwrap();
+                let elapsed_in_stage = stage_info.stage_start.elapsed();
+                
+                // Check if current stage has completed
+                if elapsed_in_stage >= stage_info.stage_duration {
+                    let next_stage_idx = stage_info.stage_index + 1;
+                    
+                    // Check if there's a next stage
+                    if next_stage_idx < load_stages.len() {
+                        let next_stage = &load_stages[next_stage_idx];
+                        
+                        tracing::info!("=== STAGE TRANSITION: Stage {} → Stage {} ===", 
+                            stage_info.stage_index + 1, 
+                            next_stage_idx + 1);
+                        tracing::info!("  New target: {} tx/s per node", next_stage.target_tx_per_second);
+                        tracing::info!("  Duration: {} seconds", next_stage.duration_seconds);
+                        
+                        // Update to next stage
+                        *stage_info = LoadStageInfo {
+                            stage_index: next_stage_idx,
+                            target_tx_per_second: next_stage.target_tx_per_second,
+                            stage_start: Instant::now(),
+                            stage_duration: Duration::from_secs(next_stage.duration_seconds),
+                        };
+                    } else {
+                        // All stages completed
+                        tracing::debug!("All stages completed");
+                        break;
+                    }
+                }
+            }
+            _ = quit_rx.recv() => {
+                tracing::debug!("Stage manager: received quit signal");
+                break;
+            }
+        }
+    }
+    
+    tracing::debug!("Stage manager task completed");
+}
+
 /// Metrics reporter task - reports stats every 1 second
 async fn metrics_reporter_task(
     stats: Arc<Mutex<HashMap<usize, NodeStats>>>,
+    current_stage: Arc<Mutex<LoadStageInfo>>,
     test_start: Instant,
     mut quit_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
@@ -311,6 +482,14 @@ async fn metrics_reporter_task(
             _ = report_interval.tick() => {
                 let now = Instant::now();
                 let stats_guard = stats.lock().unwrap();
+                
+                // Get current stage info
+                let stage_info = current_stage.lock().unwrap();
+                let current_target = stage_info.target_tx_per_second;
+                let stage_idx = stage_info.stage_index;
+                let stage_elapsed = stage_info.stage_start.elapsed();
+                let stage_remaining = stage_info.stage_duration.saturating_sub(stage_elapsed);
+                drop(stage_info);
                 
                 let mut total_tx_per_sec = 0.0;
                 let mut node_metrics = Vec::new();
@@ -342,14 +521,31 @@ async fn metrics_reporter_task(
                     last_reported_stats.insert(*node_idx, (*sent, now));
                 }
                 
-                // Log metrics
-                tracing::info!("=== Metrics at T+{:.1}s ===", test_start.elapsed().as_secs_f64());
-                for (node_idx, sent, failed, throughput) in node_metrics {
-                    let marker = if throughput < 20000.0 { " ⚠️ SLOW" } else { "" };
-                    tracing::info!("  Node {}: {:.0} tx/s ({} sent, {} failed){}",
-                        node_idx, throughput, sent, failed, marker);
+                // Log metrics with stage info
+                tracing::info!("=== Metrics at T+{:.1}s | Stage {} | Target: {} tx/s | Stage time remaining: {:.0}s ===", 
+                    test_start.elapsed().as_secs_f64(),
+                    stage_idx + 1,
+                    current_target,
+                    stage_remaining.as_secs_f64());
+                
+                let num_nodes = node_metrics.len();
+                    
+                for (node_idx, sent, failed, throughput) in &node_metrics {
+                    let target_match = (throughput / current_target as f64 * 100.0) as i32;
+                    let marker = if *throughput < current_target as f64 * 0.8 { 
+                        " ⚠️ SLOW" 
+                    } else if *throughput > current_target as f64 * 1.2 {
+                        " ⚡ FAST"
+                    } else { 
+                        "" 
+                    };
+                    tracing::info!("  Node {}: {:.0} tx/s ({}% of target, {} sent, {} failed){}",
+                        node_idx, throughput, target_match, sent, failed, marker);
                 }
-                tracing::info!("  TOTAL: {:.0} tx/s aggregate", total_tx_per_sec);
+                tracing::info!("  TOTAL: {:.0} tx/s aggregate ({:.0}% of target {})", 
+                    total_tx_per_sec,
+                    total_tx_per_sec / (current_target * num_nodes as u64) as f64 * 100.0,
+                    current_target * num_nodes as u64);
             }
             _ = quit_rx.recv() => {
                 tracing::debug!("Metrics reporter: received quit signal");
