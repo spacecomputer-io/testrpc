@@ -4,6 +4,7 @@ use std::sync::{atomic, Arc, RwLock};
 use tokio::task;
 use tokio::time::Duration;
 
+use crate::adapters::hotshot::HotshotAdapter;
 use crate::adapters::Adapter;
 use crate::common::{RoundResults, TestrpcError};
 use crate::config::{self, AdapterConfig};
@@ -13,7 +14,17 @@ pub async fn load_endpoints(cfg: config::Config) -> Result<Vec<String>, TestrpcE
     if let Some(rpcs) = cfg.rpcs {
         return Ok(rpcs);
     }
-    let adapter = adapters::new_adapter(cfg.adapter)?;
+
+    if cfg.adapter == AdapterConfig::Evm {
+        let evm_adapter = adapters::evm::EvmAdapter::default();
+        return evm_adapter
+            .load_endpoints(cfg.args.clone())
+            .await
+            .map_err(|e| TestrpcError::LoadEndpointsError(e.to_string()));
+    }
+
+    let adapter = adapters::hotshot::HotshotAdapter::new();
+
     adapter
         .load_endpoints(cfg.args.clone())
         .await
@@ -25,7 +36,30 @@ pub async fn ping_endpoints(
     rpc_urls: Vec<String>,
     timeout: Option<std::time::Duration>,
 ) -> Result<usize, TestrpcError> {
-    let adapter = adapters::new_adapter(adapter_cfg)?;
+    if adapter_cfg == AdapterConfig::Evm {
+        let adapter = Arc::new(adapters::evm::EvmAdapter::default());
+        let reachable_endpoints = Arc::new(atomic::AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for endpoint in rpc_urls.clone() {
+            let adapter = adapter.clone();
+            let endpoint_clone = endpoint.clone();
+            let reachable_endpoints = Arc::clone(&reachable_endpoints);
+            let handle = tokio::spawn(async move {
+                let res = adapter.ping_endpoint(&endpoint_clone, timeout).await;
+                tracing::info!("Pinged endpoint {}: {:?}", endpoint_clone, res);
+                if res.is_ok() {
+                    reachable_endpoints.fetch_add(1, atomic::Ordering::SeqCst);
+                }
+                res
+            });
+            handles.push(handle);
+        }
+        join_all(handles).await;
+        let live_count = reachable_endpoints.load(atomic::Ordering::SeqCst);
+        tracing::info!("Pinged {} endpoints, {} live", rpc_urls.len(), live_count);
+        return Ok(live_count);
+    }
+    let adapter = Arc::new(HotshotAdapter::new());
     let reachable_endpoints = Arc::new(atomic::AtomicUsize::new(0));
     let mut handles = Vec::new();
     for endpoint in rpc_urls.clone() {
@@ -70,6 +104,7 @@ pub async fn run(
             let round_num = r;
             let adapter = cfg.adapter.clone();
             let timeout = cfg.timeout.map(|t| Duration::from_secs(t as u64));
+            let now = std::time::Instant::now();
             tokio::select! {
                 _ = task::spawn(async move {
                     match process_round(adapter, round, iteration, rpc_urls, round_templates, timeout).await {
@@ -82,18 +117,28 @@ pub async fn run(
                             tracing::warn!("Iteration {} round {} failed: {}", iteration, round_num, e);
                         }
                     }
-                }) => {}
+                }) => {},
+                _ = tokio::time::sleep(Duration::from_secs(cfg.interval)) => {
+                    tracing::debug!("Iteration {} round {} interval elapsed", iteration, round_num);
+                    break;
+                },
                 _ = quit.recv() => {
                     tracing::debug!("Iteration {} round {} timed out as ctx was stopped", iteration, round_num);
                     break;
                 }
             }
+            let elapsed = now.elapsed();
+            let sleep_time = if cfg.interval > elapsed.as_secs() {
+                Duration::from_secs(cfg.interval - elapsed.as_secs())
+            } else {
+                Duration::from_secs(0)
+            };
             tokio::select! {
                 _ = quit.recv() => {
                     tracing::debug!("ctx stopped during iteration {} round {}", iteration, round_num);
                     break;
                 }
-                _ = tokio::time::sleep(Duration::from_secs(cfg.interval)) => {}
+                _ = tokio::time::sleep(sleep_time) => {}
             }
             if let Some(iterations) = cfg.iterations {
                 if i >= iterations as u32 {
@@ -126,8 +171,55 @@ async fn process_round(
     let mut results = RoundResults { sent: 0, failed: 0 };
     let mut handles = Vec::new();
 
-    let adapter = adapters::new_adapter(cfg)?;
+    if cfg == AdapterConfig::Evm {
+        let adapter = Arc::new(adapters::evm::EvmAdapter::default());
+        for rpc in &round.rpcs {
+            if rpc_urls.len() <= *rpc {
+                return Err(TestrpcError::LoadEndpointsError(format!(
+                    "RPC index out of bounds: {rpc}"
+                )));
+            }
+            let rpc_url = rpc_urls[*rpc].clone();
+            let req_id_clone = req_id;
 
+            let template = round.get_template(round_templates.clone()).ok_or(
+                TestrpcError::LoadRoundTemplateError("No template found".to_string()),
+            )?;
+
+            let adapter = adapter.clone();
+            let handle = tokio::spawn(async move {
+                adapter
+                    .send_txs(
+                        &rpc_url,
+                        req_id_clone,
+                        iteration,
+                        template.txs,
+                        template.tx_size,
+                        timeout,
+                    )
+                    .await
+            });
+
+            handles.push(handle);
+            req_id += 1;
+        }
+
+        let results_vec = join_all(handles).await;
+
+        for result in results_vec {
+            match result {
+                Ok(Ok(round_results)) => {
+                    results.sent += round_results.sent;
+                    results.failed += round_results.failed;
+                }
+                Ok(Err(e)) => return Err(e),
+                Err(e) => return Err(TestrpcError::ExecutionError(e.to_string())),
+            }
+        }
+        return Ok(results);
+    }
+
+    let adapter = Arc::new(HotshotAdapter::new());
     for rpc in &round.rpcs {
         if rpc_urls.len() <= *rpc {
             return Err(TestrpcError::LoadEndpointsError(format!(
@@ -184,7 +276,9 @@ mod tests {
     #[tokio::test]
     async fn test_process_round() {
         // set DRY_RUN to avoid sending requests
-        std::env::set_var("DRY_RUN", "true");
+        unsafe {
+            std::env::set_var("DRY_RUN", "true");
+        }
         let round = Round {
             rpcs: vec![0],
             repeat: Some(1),

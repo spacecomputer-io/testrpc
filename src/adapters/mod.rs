@@ -1,9 +1,9 @@
 use serde_yaml::Value;
 /// Adapter trait for implementing different RPC adapters.
 /// Each adapter should implement the methods to load endpoints and send transactions.
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
-use crate::{common, config};
+use crate::common;
 
 pub trait Adapter {
     /// Load the RPC endpoints (peers) based on the provided arguments.
@@ -37,15 +37,5 @@ pub trait Adapter {
     ) -> impl std::future::Future<Output = Result<common::RoundResults, common::TestrpcError>> + Send;
 }
 
+pub mod evm;
 pub mod hotshot;
-
-pub fn new_adapter(
-    adapter_cfg: config::AdapterConfig,
-) -> Result<Arc<impl Adapter>, common::TestrpcError> {
-    match adapter_cfg {
-        config::AdapterConfig::Hotshot => Ok(Arc::new(hotshot::HotshotAdapter::new())),
-        _ => Err(common::TestrpcError::UnsupportedAdapter(
-            adapter_cfg.to_string(),
-        )),
-    }
-}

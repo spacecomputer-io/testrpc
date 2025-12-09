@@ -23,12 +23,17 @@ struct Opts {
 async fn main() -> Result<(), common::TestrpcError> {
     let opts: Opts = Opts::parse();
     if let Some(log_file) = opts.log_file {
-        env::set_var("RUST_LOG_FILE", log_file.clone());
+        unsafe {
+            env::set_var("RUST_LOG_FILE", log_file.clone());
+        }
+
         println!("Using log file: {}", log_file.clone());
     } else {
         println!("Output log to stdout");
     }
-    env::set_var("RUST_LOG", opts.log_level.clone());
+    unsafe {
+        env::set_var("RUST_LOG", opts.log_level.clone());
+    }
     println!("Using log level: {}", &opts.log_level);
 
     let _log_guard = logging::initialize_logging();
@@ -39,7 +44,9 @@ async fn main() -> Result<(), common::TestrpcError> {
 
     if opts.dry_run {
         tracing::info!("Dry run, we will not send any RPCs");
-        env::set_var("DRY_RUN", "true");
+        unsafe {
+            env::set_var("DRY_RUN", "true");
+        }
     }
 
     let cfg = config::load_config(opts.file.as_str()).unwrap();

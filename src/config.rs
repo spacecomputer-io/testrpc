@@ -9,6 +9,7 @@ use std::{collections::HashMap, fmt::Display, str::FromStr};
 #[serde(rename_all = "lowercase")]
 pub enum AdapterConfig {
     Hotshot,
+    Evm,
     Libp2p, // TODO: Implement libp2p adapter
 }
 
@@ -18,6 +19,7 @@ impl FromStr for AdapterConfig {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "hotshot" => Ok(AdapterConfig::Hotshot),
+            "evm" => Ok(AdapterConfig::Evm),
             "libp2p" => Ok(AdapterConfig::Libp2p),
             _ => Err(TestrpcError::UnsupportedAdapter(s.to_string())),
         }
@@ -31,6 +33,7 @@ impl Display for AdapterConfig {
             "{}",
             match self {
                 AdapterConfig::Hotshot => "hotshot",
+                AdapterConfig::Evm => "evm",
                 AdapterConfig::Libp2p => "libp2p",
             }
         )

@@ -16,7 +16,9 @@ mod test {
 
     #[tokio::test]
     async fn test_e2e_dry_run() {
-        env::set_var("DRY_RUN", "true"); // run in dry-run mode
+        unsafe {
+            env::set_var("DRY_RUN", "true");
+        }
         let raw_cfg_yaml: &str = r#"
 interval: 1
 iterations: 4
