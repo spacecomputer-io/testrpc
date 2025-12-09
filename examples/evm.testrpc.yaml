@@ -1,0 +1,15 @@
+interval: 20
+iterations: 5
+adapter: evm
+args:
+  rpc_urls: 
+    - http://192.168.1.219:8545
+  fuzzer: "/Users/amirylm/dev/spacecomp/space-computer-platform/scripts/evm/fuzzer"
+rpcs:
+  - http://192.168.1.219:8545
+round_templates:
+rounds:
+  - rpcs: [0,0,0,0]
+    template:
+      txs: 1
+      tx_size: 4
