@@ -306,9 +306,10 @@ async fn run_continuous_mode(
 }
 
 /// Continuous sender task for a single node with dynamic rate adjustment
+/// and automatic reconnection on connection failure.
 async fn continuous_sender_task(
     node_idx: usize,
-    _node_url: String,
+    node_url: String,
     mut transport: Framed<TcpStream, LengthDelimitedCodec>,
     tx_size: usize,
     stats: Arc<Mutex<HashMap<usize, NodeStats>>>,
@@ -320,64 +321,88 @@ async fn continuous_sender_task(
     use bytes::{BufMut, BytesMut};
     use futures::sink::SinkExt;
     use rand::Rng;
-    
+
     // Get initial rate
     let initial_rate = current_stage.lock().unwrap().target_tx_per_second;
     let mut current_rate = initial_rate;
     let mut interval_us = 1_000_000 / current_rate;
     let mut send_interval = Duration::from_micros(interval_us);
-    
-    tracing::debug!("Node {} sender starting: {} tx/s (smooth sending, 1 tx every {}µs)", 
+
+    tracing::debug!("Node {} sender starting: {} tx/s (smooth sending, 1 tx every {}µs)",
         node_idx, current_rate, interval_us);
-    
+
     let mut interval_timer = interval(send_interval);
     interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    
+
     let mut r: u64 = rand::rng().random();
     let mut tx_count: u64 = 0;
     let mut last_stage_check = Instant::now();
-    
+    let mut connected = true;
+
     loop {
         // Check if we should stop
         if test_start.elapsed() >= test_duration {
             tracing::debug!("Node {} sender: test duration reached, stopping", node_idx);
             break;
         }
-        
+
+        // If disconnected, attempt reconnection with exponential backoff
+        if !connected {
+            let reconnected = reconnect_with_backoff(
+                node_idx,
+                &node_url,
+                &mut transport,
+                test_duration,
+                test_start,
+                &mut quit_rx,
+            ).await;
+
+            if !reconnected {
+                // Either test ended or quit signal received during reconnection
+                break;
+            }
+
+            connected = true;
+            // Reset interval timer after reconnection to avoid burst
+            interval_timer = interval(send_interval);
+            interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            tracing::info!("Node {} sender: resuming sending after reconnection", node_idx);
+        }
+
         // Periodically check if the stage has changed (every 100ms)
         if last_stage_check.elapsed() >= Duration::from_millis(100) {
             let stage_info = current_stage.lock().unwrap();
             let new_rate = stage_info.target_tx_per_second;
             drop(stage_info);
-            
+
             if new_rate != current_rate {
                 current_rate = new_rate;
                 interval_us = 1_000_000 / current_rate;
                 send_interval = Duration::from_micros(interval_us);
-                
+
                 // Create new interval timer with updated rate
                 interval_timer = interval(send_interval);
                 interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                
-                tracing::debug!("Node {} sender: rate changed to {} tx/s (1 tx every {}µs)", 
+
+                tracing::debug!("Node {} sender: rate changed to {} tx/s (1 tx every {}µs)",
                     node_idx, current_rate, interval_us);
             }
-            
+
             last_stage_check = Instant::now();
         }
-        
+
         tokio::select! {
             _ = interval_timer.tick() => {
                 let mut tx = BytesMut::with_capacity(tx_size);
-                
+
                 // Autobahn transaction format
                 r += 1;
                 tx.put_u8(1u8); // Standard transaction
                 tx.put_u64(r);
                 tx.resize(tx_size, 0u8);
-                
+
                 let bytes = tx.split().freeze();
-                
+
                 // Send transaction
                 match transport.send(bytes).await {
                     Ok(_) => {
@@ -389,13 +414,12 @@ async fn continuous_sender_task(
                         tx_count += 1;
                     }
                     Err(e) => {
-                        tracing::warn!("Node {} send error: {}", node_idx, e);
+                        tracing::warn!("Node {} send error: {} — will attempt reconnection", node_idx, e);
                         let mut stats_guard = stats.lock().unwrap();
                         if let Some(node_stats) = stats_guard.get_mut(&node_idx) {
                             node_stats.failed += 1;
                         }
-                        // Stop sending on connection error
-                        break;
+                        connected = false;
                     }
                 }
             }
@@ -405,8 +429,62 @@ async fn continuous_sender_task(
             }
         }
     }
-    
+
     tracing::debug!("Node {} sender task completed ({} transactions sent)", node_idx, tx_count);
+}
+
+/// Attempt to reconnect to a node with exponential backoff.
+/// Returns true if reconnected, false if the test ended or quit was signalled.
+async fn reconnect_with_backoff(
+    node_idx: usize,
+    node_url: &str,
+    transport: &mut Framed<TcpStream, LengthDelimitedCodec>,
+    test_duration: Duration,
+    test_start: Instant,
+    quit_rx: &mut tokio::sync::broadcast::Receiver<()>,
+) -> bool {
+    let mut backoff = Duration::from_millis(500);
+    let max_backoff = Duration::from_secs(5);
+    let mut attempt = 0u32;
+
+    loop {
+        if test_start.elapsed() >= test_duration {
+            tracing::debug!("Node {} reconnect: test duration reached, giving up", node_idx);
+            return false;
+        }
+
+        attempt += 1;
+        tracing::info!("Node {} reconnect: attempt {} (backoff {:?})", node_idx, attempt, backoff);
+
+        // Wait for backoff period or quit signal
+        tokio::select! {
+            _ = tokio::time::sleep(backoff) => {}
+            _ = quit_rx.recv() => {
+                tracing::debug!("Node {} reconnect: quit signal received", node_idx);
+                return false;
+            }
+        }
+
+        // Check time again after sleeping
+        if test_start.elapsed() >= test_duration {
+            return false;
+        }
+
+        match TcpStream::connect(node_url).await {
+            Ok(stream) => {
+                if let Err(e) = stream.set_nodelay(true) {
+                    tracing::warn!("Node {} reconnect: failed to set TCP_NODELAY: {}", node_idx, e);
+                }
+                *transport = Framed::new(stream, LengthDelimitedCodec::new());
+                tracing::info!("Node {} reconnect: success after {} attempts", node_idx, attempt);
+                return true;
+            }
+            Err(e) => {
+                tracing::debug!("Node {} reconnect: attempt {} failed: {}", node_idx, attempt, e);
+                backoff = (backoff * 2).min(max_backoff);
+            }
+        }
+    }
 }
 
 /// Stage manager task - manages transitions between load stages
