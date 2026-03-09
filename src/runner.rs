@@ -141,37 +141,47 @@ async fn run_continuous_mode(
         }]);
     }
     
-    // Establish persistent connections to all nodes
+    // Establish persistent connections to all nodes (tolerates failures —
+    // unreachable nodes will be retried by the sender task's reconnect logic)
     tracing::info!("Establishing persistent connections to {} nodes...", rpc_urls.len());
-    let mut connections = Vec::new();
-    
+    let mut connections: Vec<(usize, String, Option<Framed<TcpStream, LengthDelimitedCodec>>)> = Vec::new();
+    let mut connected_count = 0usize;
+
     for (idx, url) in rpc_urls.iter().enumerate() {
-        match TcpStream::connect(url).await {
-            Ok(stream) => {
-                // Enable TCP_NODELAY to disable Nagle's algorithm for low-latency
-                // This is critical when sending from a remote load generator
+        match tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(url)).await {
+            Ok(Ok(stream)) => {
                 if let Err(e) = stream.set_nodelay(true) {
                     tracing::warn!("Failed to set TCP_NODELAY for connection to node {}: {}", idx, e);
                 }
-                
                 let framed = Framed::new(stream, LengthDelimitedCodec::new());
-                connections.push((idx, url.clone(), framed));
+                connections.push((idx, url.clone(), Some(framed)));
+                connected_count += 1;
                 tracing::debug!("Connected to node {} ({})", idx, url);
             }
-            Err(e) => {
-                tracing::error!("Failed to connect to node {} ({}): {}", idx, url, e);
-                return Err(TestrpcError::RpcError(format!("Failed to connect to {}: {}", url, e)));
+            Ok(Err(e)) => {
+                tracing::warn!("Failed to connect to node {} ({}): {} — will retry later", idx, url, e);
+                connections.push((idx, url.clone(), None));
+            }
+            Err(_) => {
+                tracing::warn!("Connection to node {} ({}) timed out — will retry later", idx, url);
+                connections.push((idx, url.clone(), None));
             }
         }
     }
-    
-    tracing::info!("Successfully established {} persistent connections", connections.len());
+
+    if connected_count == 0 {
+        return Err(TestrpcError::RpcError("Failed to connect to ANY node".to_string()));
+    }
+
+    tracing::info!("Established {}/{} initial connections ({} will retry in background)",
+        connected_count, rpc_urls.len(), rpc_urls.len() - connected_count);
     
     // Shared statistics across all sender tasks
     let stats = Arc::new(Mutex::new(HashMap::<usize, NodeStats>::new()));
     for (idx, _, _) in &connections {
         stats.lock().unwrap().insert(*idx, NodeStats::default());
     }
+
     
     // Shared current load stage information
     let test_start = Instant::now();
@@ -185,18 +195,20 @@ async fn run_continuous_mode(
     // Spawn sender tasks for each node
     let mut sender_handles = Vec::new();
     let test_duration = Duration::from_secs(total_duration);
-    
-    for (node_idx, node_url, transport) in connections {
+
+    for (node_idx, node_url, maybe_transport) in connections {
         let stats_clone = Arc::clone(&stats);
         let current_stage_clone = Arc::clone(&current_stage);
         let ctx_clone = Arc::clone(&ctx);
         let quit_rx = ctx_clone.recv();
-        
+        let initially_connected = maybe_transport.is_some();
+
         let handle = tokio::spawn(async move {
             continuous_sender_task(
                 node_idx,
                 node_url,
-                transport,
+                maybe_transport,
+                initially_connected,
                 tx_size,
                 stats_clone,
                 current_stage_clone,
@@ -205,7 +217,7 @@ async fn run_continuous_mode(
                 quit_rx,
             ).await
         });
-        
+
         sender_handles.push(handle);
     }
     
@@ -310,7 +322,8 @@ async fn run_continuous_mode(
 async fn continuous_sender_task(
     node_idx: usize,
     node_url: String,
-    mut transport: Framed<TcpStream, LengthDelimitedCodec>,
+    maybe_transport: Option<Framed<TcpStream, LengthDelimitedCodec>>,
+    initially_connected: bool,
     tx_size: usize,
     stats: Arc<Mutex<HashMap<usize, NodeStats>>>,
     current_stage: Arc<Mutex<LoadStageInfo>>,
@@ -321,6 +334,8 @@ async fn continuous_sender_task(
     use bytes::{BufMut, BytesMut};
     use futures::sink::SinkExt;
     use rand::Rng;
+
+    let mut transport = maybe_transport;
 
     // Get initial rate
     let initial_rate = current_stage.lock().unwrap().target_tx_per_second;
@@ -337,7 +352,7 @@ async fn continuous_sender_task(
     let mut r: u64 = rand::rng().random();
     let mut tx_count: u64 = 0;
     let mut last_stage_check = Instant::now();
-    let mut connected = true;
+    let mut connected = initially_connected;
 
     loop {
         // Check if we should stop
@@ -348,25 +363,26 @@ async fn continuous_sender_task(
 
         // If disconnected, attempt reconnection with exponential backoff
         if !connected {
-            let reconnected = reconnect_with_backoff(
+            match reconnect_with_backoff(
                 node_idx,
                 &node_url,
-                &mut transport,
                 test_duration,
                 test_start,
                 &mut quit_rx,
-            ).await;
-
-            if !reconnected {
-                // Either test ended or quit signal received during reconnection
-                break;
+            ).await {
+                Some(new_transport) => {
+                    transport = Some(new_transport);
+                    connected = true;
+                    // Reset interval timer after reconnection to avoid burst
+                    interval_timer = interval(send_interval);
+                    interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    tracing::info!("Node {} sender: resuming sending after reconnection", node_idx);
+                }
+                None => {
+                    // Either test ended or quit signal received during reconnection
+                    break;
+                }
             }
-
-            connected = true;
-            // Reset interval timer after reconnection to avoid burst
-            interval_timer = interval(send_interval);
-            interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            tracing::info!("Node {} sender: resuming sending after reconnection", node_idx);
         }
 
         // Periodically check if the stage has changed (every 100ms)
@@ -404,7 +420,7 @@ async fn continuous_sender_task(
                 let bytes = tx.split().freeze();
 
                 // Send transaction
-                match transport.send(bytes).await {
+                match transport.as_mut().unwrap().send(bytes).await {
                     Ok(_) => {
                         let mut stats_guard = stats.lock().unwrap();
                         if let Some(node_stats) = stats_guard.get_mut(&node_idx) {
@@ -419,6 +435,7 @@ async fn continuous_sender_task(
                         if let Some(node_stats) = stats_guard.get_mut(&node_idx) {
                             node_stats.failed += 1;
                         }
+                        transport = None;
                         connected = false;
                     }
                 }
@@ -434,15 +451,14 @@ async fn continuous_sender_task(
 }
 
 /// Attempt to reconnect to a node with exponential backoff.
-/// Returns true if reconnected, false if the test ended or quit was signalled.
+/// Returns Some(transport) if reconnected, None if the test ended or quit was signalled.
 async fn reconnect_with_backoff(
     node_idx: usize,
     node_url: &str,
-    transport: &mut Framed<TcpStream, LengthDelimitedCodec>,
     test_duration: Duration,
     test_start: Instant,
     quit_rx: &mut tokio::sync::broadcast::Receiver<()>,
-) -> bool {
+) -> Option<Framed<TcpStream, LengthDelimitedCodec>> {
     let mut backoff = Duration::from_millis(500);
     let max_backoff = Duration::from_secs(5);
     let mut attempt = 0u32;
@@ -450,7 +466,7 @@ async fn reconnect_with_backoff(
     loop {
         if test_start.elapsed() >= test_duration {
             tracing::debug!("Node {} reconnect: test duration reached, giving up", node_idx);
-            return false;
+            return None;
         }
 
         attempt += 1;
@@ -461,13 +477,13 @@ async fn reconnect_with_backoff(
             _ = tokio::time::sleep(backoff) => {}
             _ = quit_rx.recv() => {
                 tracing::debug!("Node {} reconnect: quit signal received", node_idx);
-                return false;
+                return None;
             }
         }
 
         // Check time again after sleeping
         if test_start.elapsed() >= test_duration {
-            return false;
+            return None;
         }
 
         match TcpStream::connect(node_url).await {
@@ -475,9 +491,8 @@ async fn reconnect_with_backoff(
                 if let Err(e) = stream.set_nodelay(true) {
                     tracing::warn!("Node {} reconnect: failed to set TCP_NODELAY: {}", node_idx, e);
                 }
-                *transport = Framed::new(stream, LengthDelimitedCodec::new());
                 tracing::info!("Node {} reconnect: success after {} attempts", node_idx, attempt);
-                return true;
+                return Some(Framed::new(stream, LengthDelimitedCodec::new()));
             }
             Err(e) => {
                 tracing::debug!("Node {} reconnect: attempt {} failed: {}", node_idx, attempt, e);
