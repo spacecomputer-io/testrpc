@@ -141,39 +141,46 @@ async fn run_continuous_mode(
         }]);
     }
     
-    // Establish persistent connections to all nodes (tolerates failures —
+    // Establish persistent connections to all nodes IN PARALLEL (tolerates failures —
     // unreachable nodes will be retried by the sender task's reconnect logic)
-    tracing::info!("Establishing persistent connections to {} nodes...", rpc_urls.len());
-    let mut connections: Vec<(usize, String, Option<Framed<TcpStream, LengthDelimitedCodec>>)> = Vec::new();
-    let mut connected_count = 0usize;
+    tracing::info!("Establishing persistent connections to {} nodes (parallel)...", rpc_urls.len());
 
-    for (idx, url) in rpc_urls.iter().enumerate() {
-        match tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(url)).await {
-            Ok(Ok(stream)) => {
-                if let Err(e) = stream.set_nodelay(true) {
-                    tracing::warn!("Failed to set TCP_NODELAY for connection to node {}: {}", idx, e);
+    let connect_futures: Vec<_> = rpc_urls.iter().enumerate().map(|(idx, url)| {
+        let url = url.clone();
+        async move {
+            match tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(&url)).await {
+                Ok(Ok(stream)) => {
+                    if let Err(e) = stream.set_nodelay(true) {
+                        tracing::warn!("Failed to set TCP_NODELAY for node {}: {}", idx, e);
+                    }
+                    let framed = Framed::new(stream, LengthDelimitedCodec::new());
+                    tracing::debug!("Connected to node {} ({})", idx, url);
+                    (idx, url, Some(framed))
                 }
-                let framed = Framed::new(stream, LengthDelimitedCodec::new());
-                connections.push((idx, url.clone(), Some(framed)));
-                connected_count += 1;
-                tracing::debug!("Connected to node {} ({})", idx, url);
-            }
-            Ok(Err(e)) => {
-                tracing::warn!("Failed to connect to node {} ({}): {} — will retry later", idx, url, e);
-                connections.push((idx, url.clone(), None));
-            }
-            Err(_) => {
-                tracing::warn!("Connection to node {} ({}) timed out — will retry later", idx, url);
-                connections.push((idx, url.clone(), None));
+                Ok(Err(e)) => {
+                    tracing::warn!("Failed to connect to node {} ({}): {} — will retry later", idx, url, e);
+                    (idx, url, None)
+                }
+                Err(_) => {
+                    tracing::warn!("Connection to node {} ({}) timed out — will retry later", idx, url);
+                    (idx, url, None)
+                }
             }
         }
-    }
+    }).collect();
+
+    let mut connections: Vec<(usize, String, Option<Framed<TcpStream, LengthDelimitedCodec>>)> =
+        join_all(connect_futures).await;
+    // Sort by index to maintain deterministic order
+    connections.sort_by_key(|(idx, _, _)| *idx);
+
+    let connected_count = connections.iter().filter(|(_, _, c)| c.is_some()).count();
 
     if connected_count == 0 {
         return Err(TestrpcError::RpcError("Failed to connect to ANY node".to_string()));
     }
 
-    tracing::info!("Established {}/{} initial connections ({} will retry in background)",
+    tracing::info!("Established {}/{} initial connections in parallel ({} will retry in background)",
         connected_count, rpc_urls.len(), rpc_urls.len() - connected_count);
     
     // Shared statistics across all sender tasks
