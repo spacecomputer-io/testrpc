@@ -1,5 +1,6 @@
 use futures::future::join_all;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock, Mutex};
 use tokio::time::{Duration, Instant, interval};
 use tokio::net::TcpStream;
@@ -18,13 +19,31 @@ pub struct LoadStageInfo {
     pub stage_duration: Duration,
 }
 
-/// Per-node statistics for continuous streaming
-#[derive(Debug, Clone, Default)]
+/// Per-node statistics for continuous streaming.
+///
+/// Counters are atomic so sender tasks do not contend on a shared mutex in the
+/// hot path. Previously each send acquired a `Mutex<HashMap<usize, NodeStats>>`
+/// to increment `sent`/`bytes_sent`/`failed`; at 120k+ tx/s aggregate across
+/// 30 senders that lock became a cross-task synchronization point that could
+/// couple an otherwise-independent sender's rate to sibling-task contention.
+#[derive(Debug, Default)]
 pub struct NodeStats {
-    pub sent: u64,
-    pub failed: u64,
-    pub bytes_sent: u64,
-    pub last_reported: Option<Instant>,
+    pub sent: AtomicU64,
+    pub failed: AtomicU64,
+    pub bytes_sent: AtomicU64,
+}
+
+impl NodeStats {
+    pub fn new() -> Self {
+        NodeStats::default()
+    }
+    pub fn snapshot(&self) -> (u64, u64, u64) {
+        (
+            self.sent.load(Ordering::Relaxed),
+            self.failed.load(Ordering::Relaxed),
+            self.bytes_sent.load(Ordering::Relaxed),
+        )
+    }
 }
 
 pub async fn load_endpoints(cfg: config::Config) -> Result<Vec<String>, TestrpcError> {
@@ -183,11 +202,15 @@ async fn run_continuous_mode(
     tracing::info!("Established {}/{} initial connections in parallel ({} will retry in background)",
         connected_count, rpc_urls.len(), rpc_urls.len() - connected_count);
     
-    // Shared statistics across all sender tasks
-    let stats = Arc::new(Mutex::new(HashMap::<usize, NodeStats>::new()));
+    // Per-node atomic stats. The map itself is immutable-after-build (read-only
+    // lookups via Arc clone), and each NodeStats is independently wrapped in an
+    // Arc so sender tasks increment their own counters with zero cross-task
+    // synchronization.
+    let mut stats_map: HashMap<usize, Arc<NodeStats>> = HashMap::new();
     for (idx, _, _) in &connections {
-        stats.lock().unwrap().insert(*idx, NodeStats::default());
+        stats_map.insert(*idx, Arc::new(NodeStats::new()));
     }
+    let stats = Arc::new(stats_map);
 
     
     // Shared current load stage information
@@ -279,24 +302,20 @@ async fn run_continuous_mode(
     let _ = metrics_handle.await;
     
     // Aggregate final statistics
-    let stats_guard = stats.lock().unwrap();
     let mut total_sent = 0u64;
     let mut total_failed = 0u64;
-    
+
     tracing::info!("=== FINAL STATISTICS ===");
-    for (node_idx, node_stats) in stats_guard.iter() {
+    for (node_idx, node_stats) in stats.iter() {
+        let (sent, failed, _) = node_stats.snapshot();
         let elapsed = test_start.elapsed().as_secs_f64();
-        let throughput = if elapsed > 0.0 {
-            node_stats.sent as f64 / elapsed
-        } else {
-            0.0
-        };
-        
-        tracing::info!("Node {}: {} tx sent, {} failed, {:.0} tx/s", 
-            node_idx, node_stats.sent, node_stats.failed, throughput);
-        
-        total_sent += node_stats.sent;
-        total_failed += node_stats.failed;
+        let throughput = if elapsed > 0.0 { sent as f64 / elapsed } else { 0.0 };
+
+        tracing::info!("Node {}: {} tx sent, {} failed, {:.0} tx/s",
+            node_idx, sent, failed, throughput);
+
+        total_sent += sent;
+        total_failed += failed;
     }
     
     let total_elapsed = test_start.elapsed().as_secs_f64();
@@ -332,7 +351,7 @@ async fn continuous_sender_task(
     maybe_transport: Option<Framed<TcpStream, LengthDelimitedCodec>>,
     initially_connected: bool,
     tx_size: usize,
-    stats: Arc<Mutex<HashMap<usize, NodeStats>>>,
+    stats: Arc<HashMap<usize, Arc<NodeStats>>>,
     current_stage: Arc<Mutex<LoadStageInfo>>,
     test_duration: Duration,
     test_start: Instant,
@@ -343,6 +362,10 @@ async fn continuous_sender_task(
     use rand::Rng;
 
     let mut transport = maybe_transport;
+
+    // Fast path: capture Arc<NodeStats> for this node once. No more map lookups
+    // on the hot path — just atomic increments.
+    let my_stats = stats.get(&node_idx).cloned().expect("stats entry present");
 
     // Get initial rate
     let initial_rate = current_stage.lock().unwrap().target_tx_per_second;
@@ -429,19 +452,13 @@ async fn continuous_sender_task(
                 // Send transaction
                 match transport.as_mut().unwrap().send(bytes).await {
                     Ok(_) => {
-                        let mut stats_guard = stats.lock().unwrap();
-                        if let Some(node_stats) = stats_guard.get_mut(&node_idx) {
-                            node_stats.sent += 1;
-                            node_stats.bytes_sent += tx_size as u64;
-                        }
+                        my_stats.sent.fetch_add(1, Ordering::Relaxed);
+                        my_stats.bytes_sent.fetch_add(tx_size as u64, Ordering::Relaxed);
                         tx_count += 1;
                     }
                     Err(e) => {
                         tracing::warn!("Node {} send error: {} — will attempt reconnection", node_idx, e);
-                        let mut stats_guard = stats.lock().unwrap();
-                        if let Some(node_stats) = stats_guard.get_mut(&node_idx) {
-                            node_stats.failed += 1;
-                        }
+                        my_stats.failed.fetch_add(1, Ordering::Relaxed);
                         transport = None;
                         connected = false;
                     }
@@ -459,6 +476,12 @@ async fn continuous_sender_task(
 
 /// Attempt to reconnect to a node with exponential backoff.
 /// Returns Some(transport) if reconnected, None if the test ended or quit was signalled.
+///
+/// Tuned for short partitions (5-15s): a 500ms→5s backoff schedule could eat
+/// most of the partition budget in sleep time and delay post-heal recovery by
+/// up to 5s per worker. A 100ms→1s schedule keeps the worst-case post-heal
+/// resume under ~1s while still backing off fast enough that we don't busy-loop
+/// against a dead TCP during a long outage.
 async fn reconnect_with_backoff(
     node_idx: usize,
     node_url: &str,
@@ -466,8 +489,8 @@ async fn reconnect_with_backoff(
     test_start: Instant,
     quit_rx: &mut tokio::sync::broadcast::Receiver<()>,
 ) -> Option<Framed<TcpStream, LengthDelimitedCodec>> {
-    let mut backoff = Duration::from_millis(500);
-    let max_backoff = Duration::from_secs(5);
+    let mut backoff = Duration::from_millis(100);
+    let max_backoff = Duration::from_secs(1);
     let mut attempt = 0u32;
 
     loop {
@@ -567,22 +590,21 @@ async fn stage_manager_task(
 
 /// Metrics reporter task - reports stats every 1 second
 async fn metrics_reporter_task(
-    stats: Arc<Mutex<HashMap<usize, NodeStats>>>,
+    stats: Arc<HashMap<usize, Arc<NodeStats>>>,
     current_stage: Arc<Mutex<LoadStageInfo>>,
     test_start: Instant,
     mut quit_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     let mut report_interval = interval(Duration::from_secs(1));
     report_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    
+
     let mut last_reported_stats: HashMap<usize, (u64, Instant)> = HashMap::new();
-    
+
     loop {
         tokio::select! {
             _ = report_interval.tick() => {
                 let now = Instant::now();
-                let stats_guard = stats.lock().unwrap();
-                
+
                 // Get current stage info
                 let stage_info = current_stage.lock().unwrap();
                 let current_target = stage_info.target_tx_per_second;
@@ -590,32 +612,32 @@ async fn metrics_reporter_task(
                 let stage_elapsed = stage_info.stage_start.elapsed();
                 let stage_remaining = stage_info.stage_duration.saturating_sub(stage_elapsed);
                 drop(stage_info);
-                
+
                 let mut total_tx_per_sec = 0.0;
                 let mut node_metrics = Vec::new();
-                
-                for (node_idx, node_stats) in stats_guard.iter() {
+
+                for (node_idx, node_stats) in stats.iter() {
+                    let (sent, failed, _) = node_stats.snapshot();
+
                     // Calculate instantaneous throughput since last report
                     let default_last = (0u64, test_start);
                     let (last_sent, last_time) = last_reported_stats
                         .get(node_idx)
                         .unwrap_or(&default_last);
-                    
-                    let tx_since_last = node_stats.sent.saturating_sub(*last_sent);
+
+                    let tx_since_last = sent.saturating_sub(*last_sent);
                     let time_since_last = now.duration_since(*last_time).as_secs_f64();
-                    
+
                     let throughput = if time_since_last > 0.0 {
                         tx_since_last as f64 / time_since_last
                     } else {
                         0.0
                     };
-                    
+
                     total_tx_per_sec += throughput;
-                    node_metrics.push((*node_idx, node_stats.sent, node_stats.failed, throughput));
+                    node_metrics.push((*node_idx, sent, failed, throughput));
                 }
-                
-                drop(stats_guard);
-                
+
                 // Update last reported stats
                 for (node_idx, sent, _, _) in &node_metrics {
                     last_reported_stats.insert(*node_idx, (*sent, now));
