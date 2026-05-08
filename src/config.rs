@@ -50,15 +50,11 @@ pub struct LoadStage {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
-    /// Interval between rounds in milliseconds (deprecated for continuous mode)
+    /// Interval between rounds in milliseconds
     pub interval: u64,
-    /// Number of iterations to run, will run indefinitely if None (deprecated for continuous mode)
+    /// Number of iterations to run, will run indefinitely if None
     pub iterations: Option<usize>,
-    /// Test duration in seconds (for continuous streaming mode with single rate)
-    pub duration_seconds: Option<u64>,
-    /// Target transactions per second per node (for continuous streaming mode with single rate)
-    pub target_tx_per_second: Option<u64>,
-    /// Load stages for variable rate continuous mode (NEW)
+    /// Load stages for variable-rate continuous mode (autobahn)
     pub load_stages: Option<Vec<LoadStage>>,
     /// Number of expected nodes
     pub num_of_nodes: Option<usize>,

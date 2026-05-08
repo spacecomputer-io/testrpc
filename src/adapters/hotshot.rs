@@ -4,7 +4,7 @@ use libp2p::Multiaddr;
 use rand::Rng as _;
 use serde_yaml::Value;
 use std::collections::HashMap;
-use std::{pin::Pin, future::Future};
+use std::{future::Future, pin::Pin};
 
 use crate::common::{RoundResults, TestrpcError};
 use crate::jrpc;

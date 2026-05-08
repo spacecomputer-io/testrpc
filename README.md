@@ -13,7 +13,7 @@ Testrpc is designed to be protocol agnostic. It uses protocol adapters to intera
 The following adapters are available:
 
 - [x] Hotshot
-- [x] Autobahn (supports both legacy batch mode and new continuous streaming mode)
+- [x] Autobahn (continuous streaming with variable load stages)
 - [ ] Libp2p
 
 Each adapter should implement the following functions:
@@ -23,32 +23,44 @@ Each adapter should implement the following functions:
 
 ### Config File
 
-#### Autobahn Continuous Mode (NEW)
+#### Autobahn Continuous Mode
 
-For high-throughput continuous streaming with persistent connections:
+The Autobahn adapter runs in continuous streaming mode with persistent TCP
+connections and a list of `load_stages`, each with its own duration and target
+per-worker rate. Stage transitions are smooth — connections are reused, and the
+sending rate adjusts dynamically when a stage rolls over.
 
 ```yaml
-duration_seconds: 300 # Test duration in seconds
-target_tx_per_second: 30000 # Target tx/s per node
+load_stages:
+  - duration_seconds: 60
+    target_tx_per_second: 2000
+  - duration_seconds: 60
+    target_tx_per_second: 4000
+  - duration_seconds: 60
+    target_tx_per_second: 2000
+
 adapter: autobahn
 args:
   nodes_config_file: ".committee.json"
+
 round_templates:
-  continuous:
-    tx_size: 512 # Transaction size in bytes
+  variable_load:
+    txs: 0 # ignored in continuous mode
+    tx_size: 512
+
 rounds:
   - rpcs: [0, 1, 2, 3, 4, 5, 6, 7]
-    use_template: continuous
+    use_template: variable_load
 ```
 
 **Features:**
 
-- ✅ Persistent connections (no per-iteration reconnection overhead)
-- ✅ Independent per-node sending (fast nodes don't wait for slow ones)
-- ✅ Smooth steady-stream sending (no bursting, prevents batch accumulation)
-- ✅ Real-time per-node metrics (identify bottlenecks)
+- Persistent connections (no per-iteration reconnection overhead)
+- Independent per-node sending (fast nodes don't wait for slow ones)
+- Smooth steady-stream sending (no bursting, prevents batch accumulation)
+- Real-time per-node metrics with stage transition logging
 
-See `QUICK_START_CONTINUOUS_MODE.md` for full documentation.
+See `examples/autobahn-variable-load.testrpc.yaml` for a complete example.
 
 #### Hotshot Testing
 

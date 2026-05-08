@@ -1,7 +1,7 @@
 use serde_yaml::Value;
 /// Adapter trait for implementing different RPC adapters.
 /// Each adapter should implement the methods to load endpoints and send transactions.
-use std::{collections::HashMap, sync::Arc, pin::Pin, future::Future};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use crate::{common, config};
 
@@ -27,8 +27,8 @@ pub trait Adapter {
     ) -> Pin<Box<dyn Future<Output = Result<common::RoundResults, common::TestrpcError>> + Send + '_>>;
 }
 
-pub mod hotshot;
 pub mod autobahn;
+pub mod hotshot;
 
 pub fn new_adapter(
     adapter_cfg: config::AdapterConfig,

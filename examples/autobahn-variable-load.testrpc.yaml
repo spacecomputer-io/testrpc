@@ -4,36 +4,50 @@
 
 # Variable load stages (NEW) - replaces single duration_seconds + target_tx_per_second
 load_stages:
-  # Stage 1: Warm-up - 60 seconds at 10K tx/s per node
+  # Stage 1: Warm-up - 60 seconds at 2000 tx/s per worker
   - duration_seconds: 60
-    target_tx_per_second: 10000
+    target_tx_per_second: 2000 # 2000 * 30 = 60_000 tx/s total
 
-  # Stage 2: Ramp up - 60 seconds at 15K tx/s per node
+  # Stage 2: Ramp up - 60 seconds at 4000 tx/s per worker
   - duration_seconds: 60
-    target_tx_per_second: 15000
+    target_tx_per_second: 4000 # 4000 * 30 = 120_000 tx/s total
 
-  # Stage 3: Peak load - 60 seconds at 20K tx/s per node
+  # Stage 3: Ramp up - 60 seconds at 6000 tx/s per worker
   - duration_seconds: 60
-    target_tx_per_second: 20000
+    target_tx_per_second: 6000 # 6000 * 30 = 180_000 tx/s total
 
-  # Stage 4: Stress test - 60 seconds at 25K tx/s per node
+  # Stage 4: Peak load - 60 seconds at 8000 tx/s per worker
   - duration_seconds: 60
-    target_tx_per_second: 25000
+    target_tx_per_second: 8000 # 8000 * 30 = 240_000 tx/s total
 
-  # Stage 5: Ramp down - 60 seconds at 15K tx/s per node
+  # Stage 5: Peak load - 60 seconds at 8000 tx/s per worker
   - duration_seconds: 60
-    target_tx_per_second: 15000
+    target_tx_per_second: 8000 # 8000 * 30 = 240_000 tx/s total
 
-# Legacy parameters (not used with load_stages, but kept for compatibility)
+  # Stage 6: Peak load - 60 seconds at 8000 tx/s per worker
+  - duration_seconds: 60
+    target_tx_per_second: 8000 # 8000 * 30 = 240_000 tx/s total
+
+  # Stage 7: Ramp down - 60 seconds at 6000 tx/s per worker
+  - duration_seconds: 60
+    target_tx_per_second: 6000 # 6000 * 30 = 180_000 tx/s total
+
+  # Stage 8: Ramp down - 60 seconds at 4000 tx/s per worker
+  - duration_seconds: 60
+    target_tx_per_second: 4000 # 4000 * 30 = 120_000 tx/s total
+
+  # Stage 9: Cool-down - 60 seconds at 2000 tx/s per worker
+  - duration_seconds: 60
+    target_tx_per_second: 2000 # 2000 * 30 = 60_000 tx/s total
+
+# Required scaffolding fields (unused in continuous mode)
 interval: 0
 iterations: 0
-duration_seconds: 0
-target_tx_per_second: 0
 
 # Adapter configuration
 adapter: autobahn
 args:
-  nodes_config_file: "examples/autobahn-authorities.json"
+  nodes_config_file: ".committee.json"
 
 # Round templates define transaction characteristics
 round_templates:
@@ -43,7 +57,38 @@ round_templates:
 
 # Rounds configuration (only used for template reference in continuous mode)
 rounds:
-  - rpcs: [0, 1, 2, 3, 4, 5, 6, 7] # All 8 nodes
+  - rpcs: [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+      ] # All 60 3 per node workers
     use_template: variable_load
 # Behavioral Characteristics:
 # ============================
@@ -55,7 +100,7 @@ rounds:
 #   - No reconnections between stages
 #
 # CONNECTIONS:
-#   - Establishes 8 persistent TCP connections at startup
+#   - Establishes 30 persistent TCP connections at startup (one per worker)
 #   - Reuses connections throughout all stages
 #   - Closes connections only at shutdown
 #   - No per-stage connection overhead
@@ -79,13 +124,16 @@ rounds:
 #   - Step testing: discrete load levels to measure response
 #   - Stress testing: push to peak load then back down
 #
-# Expected Performance (with 8 nodes):
-#   - Stage 1: 8 × 10,000 = 80,000 tx/s aggregate
-#   - Stage 2: 8 × 15,000 = 120,000 tx/s aggregate
-#   - Stage 3: 8 × 20,000 = 160,000 tx/s aggregate
-#   - Stage 4: 8 × 25,000 = 200,000 tx/s aggregate
-#   - Stage 5: 8 × 15,000 = 120,000 tx/s aggregate
-#   - Total test duration: 5 minutes (300 seconds)
-#   - Total transactions per node: ~90,000
-#   - Total transactions aggregate: ~720,000
-
+# Expected Performance (with 30 workers):
+#   - Stage 1: 30 × 2,000 =  60,000 tx/s aggregate
+#   - Stage 2: 30 × 4,000 = 120,000 tx/s aggregate
+#   - Stage 3: 30 × 6,000 = 180,000 tx/s aggregate
+#   - Stage 4: 30 × 8,000 = 240,000 tx/s aggregate
+#   - Stage 5: 30 × 8,000 = 240,000 tx/s aggregate
+#   - Stage 6: 30 × 8,000 = 240,000 tx/s aggregate
+#   - Stage 7: 30 × 6,000 = 180,000 tx/s aggregate
+#   - Stage 8: 30 × 4,000 = 120,000 tx/s aggregate
+#   - Stage 9: 30 × 2,000 =  60,000 tx/s aggregate
+#   - Total test duration: 9 minutes (540 seconds)
+#   - Total transactions per worker: ~2,880,000
+#   - Total transactions aggregate: ~86,400,000
